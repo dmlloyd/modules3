@@ -112,10 +112,6 @@ abstract class LinkState {
             return module;
         }
 
-        ModuleLayer layer() {
-            return layerController.layer();
-        }
-
         ModuleLayer.Controller layerController() {
             return layerController;
         }
@@ -126,26 +122,20 @@ abstract class LinkState {
     }
 
     static class Linked extends Defined {
-        private final List<DirectLoader> dependencyLoaders;
-        private final Map<String, DirectLoader> directLoadersByPackage;
+        private final Map<String, Module> modulesByPackage;
         private final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache = new ConcurrentHashMap<>();
 
-        Linked(Defined other, final List<DirectLoader> dependencyLoaders, final Map<String, DirectLoader> directLoadersByPackage) {
+        Linked(Defined other, final Map<String, Module> modulesByPackage) {
             super(other);
-            this.dependencyLoaders = dependencyLoaders;
-            this.directLoadersByPackage = directLoadersByPackage;
+            this.modulesByPackage = modulesByPackage;
         }
 
         Linked(Linked other) {
-            this(other, other.dependencyLoaders, other.directLoadersByPackage);
+            this(other, other.modulesByPackage);
         }
 
-        List<DirectLoader> dependencyLoaders() {
-            return dependencyLoaders;
-        }
-
-        Map<String, DirectLoader> directLoadersByPackage() {
-            return directLoadersByPackage;
+        Map<String, Module> modulesByPackage() {
+            return modulesByPackage;
         }
 
         ProtectionDomain cachedProtectionDomain(final Resource resource) {

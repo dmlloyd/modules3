@@ -52,7 +52,7 @@ import org.jboss.logging.Logger;
 /**
  * A class loader for a module.
  */
-public class ModuleClassLoader extends ClassLoader implements DirectLoader {
+public class ModuleClassLoader extends ClassLoader {
     private static final Logger log = Logger.getLogger("io.github.dmlloyd.modules");
 
     static {
@@ -117,10 +117,12 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         return linkDefined().module();
     }
 
+    @Override
     public final Class<?> loadClass(final String name) throws ClassNotFoundException {
         return loadClass(name, false);
     }
 
+    @Override
     protected final Class<?> loadClass(final String name, final boolean resolve) throws ClassNotFoundException {
         if (name.startsWith("[")) {
             return loadClassFromDescriptor(name);
@@ -132,11 +134,25 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         } else {
         }
         String packageName = dotName.substring(0, lastDot);
-        DirectLoader loader = linkFull().directLoadersByPackage().get(packageName);
-        if (loader == null) {
+        Module module = linkFull().modulesByPackage().get(packageName);
+        if (module == null) {
             throw new ClassNotFoundException("Class loader for " + this + " does not link against package `" + packageName + "`");
         }
-        Class<?> loaded = loader.loadClassDirect(dotName);
+        Class<?> loaded;
+        ClassLoader cl = module.getClassLoader();
+        if (cl == this) {
+            loaded = loadClassDirect(dotName);
+        } else {
+            if (module.isExported(packageName, module())) {
+                if (cl instanceof ModuleClassLoader mcl) {
+                    loaded = mcl.loadClassDirect(dotName);
+                } else {
+                    loaded = Class.forName(dotName, false, cl);
+                }
+            } else {
+                throw new ClassNotFoundException("Module " + module.getName() + " does not export package " + packageName + " to " + module().getName());
+            }
+        }
         if (resolve) {
             // note: this is a no-op in OpenJDK
             resolveClass(loaded);
@@ -144,14 +160,63 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         return loaded;
     }
 
-    private static final StackWalker stackWalker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
-
     public final Resource getExportedResource(final String name) {
         // todo: filter to exportable resources
         try {
             return getExportedResource(name, stackWalker.getCallerClass());
         } catch (IOException e) {
             return null;
+        }
+    }
+
+    public final URL getResource(final String name) {
+        Resource resource;
+        try {
+            resource = getExportedResource(name, stackWalker.getCallerClass());
+        } catch (IOException e) {
+            return null;
+        }
+        return resource == null ? null : resource.url();
+    }
+
+    @Override
+    public final InputStream getResourceAsStream(final String name) {
+        Resource resource;
+        try {
+            resource = getExportedResource(name, stackWalker.getCallerClass());
+            return resource == null ? null : resource.openStream();
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    public final List<Resource> getExportedResources(final String name) throws IOException {
+        return getExportedResources(name, stackWalker.getCallerClass());
+    }
+
+    @Override
+    public final Enumeration<URL> getResources(final String name) throws IOException {
+        // todo: filter to exportable resources
+        List<Resource> resources = loadResourcesDirect(name);
+        Iterator<Resource> iterator = resources.iterator();
+        return new Enumeration<URL>() {
+            public boolean hasMoreElements() {
+                return iterator.hasNext();
+            }
+
+            public URL nextElement() {
+                return iterator.next().url();
+            }
+        };
+    }
+
+    @Override
+    public final Stream<URL> resources(final String name) {
+        // todo: filter to exportable resources
+        try {
+            return loadResourcesDirect(name).stream().map(Resource::url);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -192,30 +257,6 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         return null;
     }
 
-    public final URL getResource(final String name) {
-        Resource resource;
-        try {
-            resource = getExportedResource(name, stackWalker.getCallerClass());
-        } catch (IOException e) {
-            return null;
-        }
-        return resource == null ? null : resource.url();
-    }
-
-    public final InputStream getResourceAsStream(final String name) {
-        Resource resource;
-        try {
-            resource = getExportedResource(name, stackWalker.getCallerClass());
-            return resource == null ? null : resource.openStream();
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
-    public final List<Resource> getExportedResources(final String name) throws IOException {
-        return getExportedResources(name, stackWalker.getCallerClass());
-    }
-
     private List<Resource> getExportedResources(final String name, final Class<?> caller) throws IOException {
         List<Resource> resources = loadResourcesDirect(name);
         if (resources.isEmpty()) {
@@ -244,33 +285,9 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         return null;
     }
 
-    public final Enumeration<URL> getResources(final String name) throws IOException {
-        // todo: filter to exportable resources
-        List<Resource> resources = loadResourcesDirect(name);
-        Iterator<Resource> iterator = resources.iterator();
-        return new Enumeration<URL>() {
-            public boolean hasMoreElements() {
-                return iterator.hasNext();
-            }
-
-            public URL nextElement() {
-                return iterator.next().url();
-            }
-        };
-    }
-
-    public final Stream<URL> resources(final String name) {
-        // todo: filter to exportable resources
-        try {
-            return loadResourcesDirect(name).stream().map(Resource::url);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     // direct loaders
 
-    public final Class<?> loadClassDirect(String name) throws ClassNotFoundException {
+    final Class<?> loadClassDirect(String name) throws ClassNotFoundException {
         String dotName = name.replace('/', '.');
         Class<?> loaded = findLoadedClass(dotName);
         if (loaded != null) {
@@ -305,7 +322,7 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         throw new ClassNotFoundException("Class `" + name + "` is not found in this loader");
     }
 
-    public final Resource loadResourceDirect(final String name) throws IOException {
+    final Resource loadResourceDirect(final String name) throws IOException {
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
             return loadModuleInfo();
@@ -319,7 +336,7 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         return null;
     }
 
-    public final List<Resource> loadResourcesDirect(final String name) throws IOException {
+    final List<Resource> loadResourcesDirect(final String name) throws IOException {
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
             return List.of(loadModuleInfo());
@@ -351,7 +368,7 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         return value;
     }
 
-    public final Package loadPackageDirect(final String name) {
+    final Package loadPackageDirect(final String name) {
         Package pkg = getDefinedPackage(name);
         if (pkg != null) {
             return pkg;
@@ -415,14 +432,6 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
                 return pkg;
             }
             throw e;
-        }
-    }
-
-    public final Module loadModuleDirect(final String name) throws ModuleNotFoundException {
-        if (name.equals(moduleName)) {
-            return module();
-        } else {
-            throw new ModuleNotFoundException("Failed to find module " + name + " in loader for module " + moduleName);
         }
     }
 
@@ -523,29 +532,31 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
             return linked;
         }
         List<Dependency> dependencies = linkState.dependencies();
-        List<DirectLoader> loaders = new ArrayList<>(dependencies.size());
+        List<Module> loaders = new ArrayList<>(dependencies.size());
         for (Dependency dependency : dependencies) {
             String depName = dependency.moduleName();
             Module resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
             if (resolved != null) {
                 // link to it
                 linkState.layerController().addReads(linkState.module(), resolved);
-                loaders.add(DirectLoader.forModule(resolved));
+                loaders.add(resolved);
             } else if (! dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
                 throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
             }
         }
         // the actual map to build
-        HashMap<String, DirectLoader> loadersByPackage = new HashMap<>();
-        for (DirectLoader loader : loaders) {
-            Set<String> packages = loader.exportedPackages();
+        HashMap<String, Module> modulesByPackage = new HashMap<>();
+        for (Module module : loaders) {
+            Set<String> packages = module.getPackages();
             for (String pkg : packages) {
-                loadersByPackage.putIfAbsent(pkg, loader);
+                if (module.isExported(pkg, linkState.module())) {
+                    modulesByPackage.putIfAbsent(pkg, module);
+                }
             }
         }
         // and don't forget our own packages
         for (String pkg : linkState.packages()) {
-            loadersByPackage.put(pkg, this);
+            modulesByPackage.put(pkg, linkState.module());
         }
         // link up directed exports and opens
         for (Export export : linkState.exports()) {
@@ -570,10 +581,10 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
                 }
             }
         }
-        return doLocked(this_ -> this_.linkFullLocked(loaders, loadersByPackage));
+        return doLocked(this_ -> this_.linkFullLocked(modulesByPackage));
     }
 
-    private LinkState.Linked linkFullLocked(final List<DirectLoader> loaders, final Map<String, DirectLoader> loadersByPackage) {
+    private LinkState.Linked linkFullLocked(final Map<String, Module> modulesByPackage) {
         // double-check it inside the lock
         LinkState.Defined defined = linkDefined();
         if (defined instanceof LinkState.Linked linked) {
@@ -582,8 +593,7 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         log.debugf("Linking module %s to fully linked state", moduleName);
         LinkState.Linked linked = new LinkState.Linked(
             defined,
-            List.copyOf(loaders),
-            Map.copyOf(loadersByPackage)
+            Map.copyOf(modulesByPackage)
         );
         linkState = linked;
         return linked;
@@ -698,20 +708,30 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
         if (defined != null) {
             return defined;
         }
-        DirectLoader loader = linkFull().directLoadersByPackage().get(name);
-        if (loader == null) {
+        Module module = linkFull().modulesByPackage().get(name);
+        if (module == null) {
             // no such package
             return null;
         }
-        return loader.loadPackageDirect(name);
+        return loadPackage(module, name);
+    }
+
+    private Package loadPackage(Module module, String pkg) {
+        ClassLoader cl = module.getClassLoader();
+        if (cl instanceof ModuleClassLoader mcl) {
+            return mcl.loadPackageDirect(pkg);
+        } else {
+            // best effort; todo: this could possibly be improved somewhat
+            return cl == null ? null : cl.getDefinedPackage(pkg);
+        }
     }
 
     protected final Package[] getPackages() {
-        return linkFull().directLoadersByPackage()
+        return linkFull().modulesByPackage()
             .entrySet()
             .stream()
             .sorted()
-            .map(e -> e.getValue().loadPackageDirect(e.getKey()))
+            .map(e -> loadPackage(e.getValue(), e.getKey()))
             .filter(Objects::nonNull)
             .toArray(Package[]::new);
     }
@@ -929,4 +949,6 @@ public class ModuleClassLoader extends ClassLoader implements DirectLoader {
             }
         }
     }
+
+    private static final StackWalker stackWalker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
 }
