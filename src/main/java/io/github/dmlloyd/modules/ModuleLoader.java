@@ -8,7 +8,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
+import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.constraint.Assert;
+import io.smallrye.common.resource.ResourceLoader;
 
 /**
  * A loader for modules.
@@ -131,20 +133,49 @@ public class ModuleLoader implements Closeable {
             if (loader != null) {
                 return loader;
             }
-            loader = new ModuleClassLoader(new ModuleClassLoader.ClassLoaderConfiguration(
-                this,
-                name(),
-                desc.resourceLoaders(),
-                moduleName,
-                desc.version().orElse(null),
-                desc.dependencies(),
-                desc.exports(),
-                desc.opens(),
-                desc.packages(),
-                desc.modifiers(),
-                desc.uses(),
-                desc.provides()
-            ));
+            List<ResourceLoaderOpener> openers = desc.resourceLoaderOpeners();
+            int cnt = openers.size();
+            ResourceLoader[] resourceLoaders = new ResourceLoader[cnt];
+            try {
+                for (int i = 0; i < cnt; i++) {
+                    try {
+                        resourceLoaders[i] = openers.get(i).open();
+                        if (resourceLoaders[i] == null) {
+                            throw new NullPointerException("Resource loader opener " + openers.get(i) + " returned null for open()");
+                        }
+                    } catch (Throwable t) {
+                        for (int j = i - 1; j >= 0; j--) {
+                            try {
+                                resourceLoaders[i].close();
+                            } catch (Throwable t2) {
+                                t.addSuppressed(t2);
+                            }
+                        }
+                        throw t;
+                    }
+                }
+                loader = desc.classLoaderFactory().apply(new ModuleClassLoader.ClassLoaderConfiguration(
+                    this,
+                    name(),
+                    List.of(resourceLoaders),
+                    moduleName,
+                    desc.version().orElse(null),
+                    desc.dependencies(),
+                    desc.exports(),
+                    desc.opens(),
+                    desc.packages(),
+                    desc.modifiers(),
+                    desc.uses(),
+                    desc.provides()
+                ));
+                if (loader == null) {
+                    throw new NullPointerException("Class loader factory " + desc.classLoaderFactory() + " returned null for apply()");
+                }
+            } catch (ModuleLoadException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new ModuleLoadException("Failed to create module " + moduleName, e);
+            }
             loaders.put(moduleName, loader);
             return loader;
         } finally {

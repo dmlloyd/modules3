@@ -24,7 +24,6 @@ import io.github.dmlloyd.classfile.extras.reflect.AccessFlag;
 import io.github.dmlloyd.modules.ModuleClassLoader;
 import io.github.dmlloyd.modules.NativeAccess;
 import io.smallrye.common.constraint.Assert;
-import io.smallrye.common.resource.ResourceLoader;
 
 /**
  * A descriptor for initially defining a module.
@@ -41,7 +40,7 @@ public record ModuleDescriptor(
     Set<Open> opens,
     Set<String> uses,
     Set<Provide> provides,
-    List<ResourceLoader> resourceLoaders,
+    List<ResourceLoaderOpener> resourceLoaderOpeners,
     Set<String> packages
 ) {
 
@@ -57,11 +56,11 @@ public record ModuleDescriptor(
         opens = Set.copyOf(opens);
         uses = Set.copyOf(uses);
         provides = Set.copyOf(provides);
-        resourceLoaders = List.copyOf(resourceLoaders);
+        resourceLoaderOpeners = List.copyOf(resourceLoaderOpeners);
         packages = Set.copyOf(packages);
     }
 
-    public ModuleDescriptor withResourceLoaders(final List<ResourceLoader> resourceLoaders) {
+    public ModuleDescriptor withResourceLoaders(final List<ResourceLoaderOpener> resourceLoaderOpeners) {
         return new ModuleDescriptor(
             name,
             version,
@@ -74,7 +73,7 @@ public record ModuleDescriptor(
             opens,
             uses,
             provides,
-            resourceLoaders,
+            resourceLoaderOpeners,
             packages
         );
     }

@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.List;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
+import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.resource.JarFileResourceLoader;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -103,7 +104,7 @@ public interface ModuleFinder extends Closeable {
                                         }
                                         return ModuleDescriptor.fromModuleInfo(bytes, () -> {
                                             throw new UnsupportedOperationException("todo");
-                                        }).withResourceLoaders(resourceLoaders);
+                                        }).withResourceLoaders(resourceLoaders.stream().map(ResourceLoaderOpener::forLoader).toList());
                                     }
                                 } catch (NoSuchFileException | FileNotFoundException ignored) {
                                     // just try the next one

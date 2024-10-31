@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.jar.Manifest;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
+import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.resource.JarFileResourceLoader;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -20,7 +21,7 @@ final class JarFileModuleFinder implements ModuleFinder {
 
     JarFileModuleFinder(final ResourceLoader jarLoader) {
         this.jarLoader = jarLoader;
-        descriptor = computeModuleDesc(jarLoader).withResourceLoaders(List.of(jarLoader));
+        descriptor = computeModuleDesc(jarLoader).withResourceLoaders(List.of(ResourceLoaderOpener.forLoader(jarLoader)));
     }
 
     static ModuleDescriptor computeModuleDesc(ResourceLoader loader) {
