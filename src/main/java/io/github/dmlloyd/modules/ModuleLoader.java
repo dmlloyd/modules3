@@ -57,19 +57,6 @@ public class ModuleLoader implements Closeable {
         }
     }
 
-    /**
-     * Load a module with the given name, delegating as needed.
-     * This method may call {@link #findModuleLocal(String)} to attempt to load a locally-defined
-     * module.
-     *
-     * @param moduleName the name of the module to load (not {@code null})
-     * @return the loaded module, or {@code null} if no module was found for the given name
-     */
-    protected Module doLoadModule(final String moduleName) {
-        ModuleClassLoader loaded = findModuleLocal(moduleName);
-        return loaded == null ? null : loaded.module();
-    }
-
     public void close() throws IOException {
         List<ModuleClassLoader> loaders;
         defineLock.lock();
@@ -103,6 +90,30 @@ public class ModuleLoader implements Closeable {
         if (ioe != null) {
             throw ioe;
         }
+    }
+
+    /**
+     * Load a module with the given name, delegating as needed.
+     * This method may call {@link #findModuleLocal(String)} to attempt to load a locally-defined
+     * module.
+     *
+     * @param moduleName the name of the module to load (not {@code null})
+     * @return the loaded module, or {@code null} if no module was found for the given name
+     */
+    protected Module doLoadModule(final String moduleName) {
+        ModuleClassLoader loaded = findModuleLocal(moduleName);
+        return loaded == null ? null : loaded.module();
+    }
+
+    /**
+     * {@return the controller for the given module class loader}
+     * @param loader the module class loader (must not be {@code null})
+     */
+    protected final ModuleClassLoader.Controller controllerFor(ModuleClassLoader loader) {
+        if (loader.moduleLoader() == this) {
+            return loader.controller();
+        }
+        throw new SecurityException("Invalid access to controller");
     }
 
     /**
@@ -170,6 +181,9 @@ public class ModuleLoader implements Closeable {
                 ));
                 if (loader == null) {
                     throw new NullPointerException("Class loader factory " + desc.classLoaderFactory() + " returned null for apply()");
+                }
+                if (loader.moduleLoader() != this) {
+                    throw new SecurityException("Invalid access to wrong module loader");
                 }
             } catch (ModuleLoadException e) {
                 throw e;

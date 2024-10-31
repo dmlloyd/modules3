@@ -72,6 +72,7 @@ public class ModuleClassLoader extends ClassLoader {
     private final ReentrantLock linkLock = new ReentrantLock();
 
     private volatile LinkState linkState;
+    private final Controller controller = new Controller();
 
     /**
      * Construct a new instance.
@@ -339,7 +340,7 @@ public class ModuleClassLoader extends ClassLoader {
                 if (resource != null) {
                     // found it!
                     ProtectionDomain pd = linked.cachedProtectionDomain(resource);
-                    return defineClass(dotName, resource, pd);
+                    return defineOrGetClass(dotName, resource, pd);
                 }
             }
         } catch (IOException e) {
@@ -675,12 +676,15 @@ public class ModuleClassLoader extends ClassLoader {
         };
     }
 
-    private Class<?> defineClass(final String dotName, final Resource resource, final ProtectionDomain pd) throws IOException {
+    private Class<?> defineOrGetClass(final String dotName, final Resource resource, final ProtectionDomain pd) throws IOException {
+        return defineOrGetClass(dotName, resource.asBuffer(), pd);
+    }
+
+    private Class<?> defineOrGetClass(final String dotName, final ByteBuffer buffer, final ProtectionDomain pd) {
         int lastDot = dotName.lastIndexOf('.');
         if (lastDot != -1) {
             loadPackageDirect(dotName.substring(0, lastDot));
         }
-        ByteBuffer buffer = resource.asBuffer();
         try {
             return defineClass(dotName, buffer, pd);
         } catch (LinkageError e) {
@@ -804,6 +808,10 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
+    Controller controller() {
+        return controller;
+    }
+
     public static final class ClassLoaderConfiguration {
         private final ModuleLoader moduleLoader;
         private final String classLoaderName;
@@ -896,7 +904,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     public final class Controller {
-        private Controller() {
+        Controller() {
         }
 
         /**
@@ -908,6 +916,10 @@ public class ModuleClassLoader extends ClassLoader {
 
         public ModuleClassLoader classLoader() {
             return ModuleClassLoader.this;
+        }
+
+        public Class<?> defineClass(String name, ByteBuffer bytes, ProtectionDomain protectionDomain) {
+            return ModuleClassLoader.this.defineOrGetClass(name, bytes, protectionDomain);
         }
     }
 
