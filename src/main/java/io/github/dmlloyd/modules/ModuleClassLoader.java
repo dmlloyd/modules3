@@ -81,6 +81,9 @@ public class ModuleClassLoader extends ClassLoader {
      */
     public ModuleClassLoader(ClassLoaderConfiguration config) {
         super(config.classLoaderName(), null);
+        if (! isRegisteredAsParallelCapable()) {
+            throw new IllegalStateException("Class loader is not registered as parallel-capable");
+        }
         this.moduleLoader = config.moduleLoader();
         this.moduleName = config.moduleName();
         this.moduleVersion = config.moduleVersion();
