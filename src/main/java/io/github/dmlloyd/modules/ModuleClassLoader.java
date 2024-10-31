@@ -53,7 +53,6 @@ import org.jboss.logging.Logger;
  * A class loader for a module.
  */
 public class ModuleClassLoader extends ClassLoader {
-    private static final Logger log = Logger.getLogger("io.github.dmlloyd.modules");
 
     static {
         if (! ClassLoader.registerAsParallelCapable()) {
@@ -163,7 +162,7 @@ public class ModuleClassLoader extends ClassLoader {
     public final Resource getExportedResource(final String name) {
         // todo: filter to exportable resources
         try {
-            return getExportedResource(name, stackWalker.getCallerClass());
+            return getExportedResource(name, stackWalker.walk(callerFinder));
         } catch (IOException e) {
             return null;
         }
@@ -172,7 +171,7 @@ public class ModuleClassLoader extends ClassLoader {
     public final URL getResource(final String name) {
         Resource resource;
         try {
-            resource = getExportedResource(name, stackWalker.getCallerClass());
+            resource = getExportedResource(name, stackWalker.walk(callerFinder));
         } catch (IOException e) {
             return null;
         }
@@ -183,7 +182,7 @@ public class ModuleClassLoader extends ClassLoader {
     public final InputStream getResourceAsStream(final String name) {
         Resource resource;
         try {
-            resource = getExportedResource(name, stackWalker.getCallerClass());
+            resource = getExportedResource(name, stackWalker.walk(callerFinder));
             return resource == null ? null : resource.openStream();
         } catch (IOException e) {
             return null;
@@ -191,7 +190,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     public final List<Resource> getExportedResources(final String name) throws IOException {
-        return getExportedResources(name, stackWalker.getCallerClass());
+        return getExportedResources(name, stackWalker.walk(callerFinder));
     }
 
     @Override
@@ -220,6 +219,26 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
+    public final Set<String> exportedPackages() {
+        return linkFull().exportedPackages();
+    }
+
+    /**
+     * {@return the module class loader of the calling class, or {@code null} if the calling class does not have one}
+     */
+    public static ModuleClassLoader current() {
+        return stackWalker.walk(callerClassLoaderFinder) instanceof ModuleClassLoader mcl ? mcl : null;
+    }
+
+    /**
+     * {@return the module class loader of the given module, or {@code null} if it does not have one}
+     */
+    public static ModuleClassLoader forModule(Module module) {
+        return module.getClassLoader() instanceof ModuleClassLoader mcl ? mcl : null;
+    }
+
+    // private
+
     /**
      * Get a resource from an exported and open package.
      *
@@ -243,7 +262,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (dot == - 1) {
             return resource;
         }
-        if (caller.getModule().getClassLoader() == this) {
+        if (caller == null || caller.getModule().getClassLoader() == this) {
             return resource;
         }
         String pkgName = dotName.substring(0, dot);
@@ -271,7 +290,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (dot == - 1) {
             return resources;
         }
-        if (caller.getModule().getClassLoader() == this) {
+        if (caller == null || caller.getModule().getClassLoader() == this) {
             return resources;
         }
         String pkgName = dotName.substring(0, dot);
@@ -287,6 +306,13 @@ public class ModuleClassLoader extends ClassLoader {
 
     // direct loaders
 
+    /**
+     * Load a class directly from this class loader.
+     *
+     * @param name the dot-separated ("binary") name of the class to load (must not be {@code null})
+     * @return the loaded class (not {@code null})
+     * @throws ClassNotFoundException if the class is not found in this class loader
+     */
     final Class<?> loadClassDirect(String name) throws ClassNotFoundException {
         String dotName = name.replace('/', '.');
         Class<?> loaded = findLoadedClass(dotName);
@@ -433,24 +459,6 @@ public class ModuleClassLoader extends ClassLoader {
             }
             throw e;
         }
-    }
-
-    public final Set<String> exportedPackages() {
-        return linkFull().exportedPackages();
-    }
-
-    /**
-     * {@return the module class loader of the calling class, or {@code null} if the calling class does not have one}
-     */
-    public static ModuleClassLoader current() {
-        return stackWalker.getCallerClass().getClassLoader() instanceof ModuleClassLoader mcl ? mcl : null;
-    }
-
-    /**
-     * {@return the module class loader of the given module, or {@code null} if it does not have one}
-     */
-    public static ModuleClassLoader forModule(Module module) {
-        return module.getClassLoader() instanceof ModuleClassLoader mcl ? mcl : null;
     }
 
     // linking
@@ -950,5 +958,8 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
+    private static final Logger log = Logger.getLogger("io.github.dmlloyd.modules");
     private static final StackWalker stackWalker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+    private static final Function<Stream<StackWalker.StackFrame>, Class<?>> callerFinder = s -> s.map(StackWalker.StackFrame::getDeclaringClass).filter(c -> c.getClassLoader() != null).findFirst().orElse(null);
+    private static final Function<Stream<StackWalker.StackFrame>, ClassLoader> callerClassLoaderFinder = s -> s.map(StackWalker.StackFrame::getDeclaringClass).map(Class::getClassLoader).findFirst().orElse(null);
 }
