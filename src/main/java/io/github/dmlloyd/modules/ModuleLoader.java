@@ -24,6 +24,12 @@ public class ModuleLoader implements Closeable {
     private static final Module javaBase = Object.class.getModule();
     private static final LoadedModule loadedJavaBase = LoadedModule.forModule(javaBase);
 
+    /**
+     * Construct a new instance.
+     *
+     * @param name the module loader's name (must not be {@code null})
+     * @param moduleFinder the module finder for this loader (must not be {@code null})
+     */
     public ModuleLoader(final String name, final ModuleFinder moduleFinder) {
         this.name = Assert.checkNotNullParam("name", name);
         this.moduleFinder = Assert.checkNotNullParam("moduleFinder", moduleFinder);

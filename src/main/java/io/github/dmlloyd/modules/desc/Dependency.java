@@ -26,6 +26,15 @@ public record Dependency(
     }
 
     /**
+     * Construct a new instance with no modifiers and no module loader.
+     *
+     * @param moduleName the dependency name (must not be {@code null})
+     */
+    public Dependency(String moduleName) {
+        this(moduleName, Modifiers.of(), Optional.empty());
+    }
+
+    /**
      * Modifiers for dependencies.
      */
     public enum Modifier implements ModifierFlag {
