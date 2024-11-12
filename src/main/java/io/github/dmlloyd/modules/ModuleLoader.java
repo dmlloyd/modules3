@@ -136,6 +136,9 @@ public class ModuleLoader implements Closeable {
     }
 
     final ModuleClassLoader defineOrGet(String moduleName, ModuleDescriptor desc) {
+        if (! desc.name().equals(moduleName)) {
+            throw new ModuleLoadException("Module name \"" + moduleName + "\" does not match descriptor module name \"" + desc.name() + "\"");
+        }
         ConcurrentHashMap<String, ModuleClassLoader> loaders = this.loaders;
         ReentrantLock lock = defineLock;
         lock.lock();

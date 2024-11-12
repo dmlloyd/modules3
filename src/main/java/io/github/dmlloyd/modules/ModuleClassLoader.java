@@ -60,6 +60,8 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
+    private static final Module javaBase = Object.class.getModule();
+
     private final String moduleName;
     private final String moduleVersion;
     private final ModuleLoader moduleLoader;
@@ -137,6 +139,10 @@ public class ModuleClassLoader extends ClassLoader {
         } else {
         }
         String packageName = dotName.substring(0, lastDot);
+        if (javaBase.getPackages().contains(packageName)) {
+            // -> BootLoader.loadClass(...)
+            return Class.forName(javaBase, name);
+        }
         Module module = linkFull().modulesByPackage().get(packageName);
         if (module == null) {
             throw new ClassNotFoundException("Class loader for " + this + " does not link against package `" + packageName + "`");
@@ -150,7 +156,7 @@ public class ModuleClassLoader extends ClassLoader {
                 if (cl instanceof ModuleClassLoader mcl) {
                     loaded = mcl.loadClassDirect(dotName);
                 } else {
-                    loaded = Class.forName(dotName, false, cl);
+                    loaded = Class.forName(module, dotName);
                 }
             } else {
                 throw new ClassNotFoundException("Module " + module.getName() + " does not export package " + packageName + " to " + module().getName());
@@ -333,7 +339,7 @@ public class ModuleClassLoader extends ClassLoader {
         }
         LinkState.Linked linked = linkFull();
         if (! linked.packages().contains(packageName)) {
-            throw new ClassNotFoundException("Class `" + name + "` is not in a package contained within this loader");
+            throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from this loader");
         }
 
         String fullPath = slashName + ".class";
@@ -559,10 +565,13 @@ public class ModuleClassLoader extends ClassLoader {
         // the actual map to build
         HashMap<String, Module> modulesByPackage = new HashMap<>();
         for (Module module : loaders) {
-            Set<String> packages = module.getPackages();
-            for (String pkg : packages) {
-                if (module.isExported(pkg, linkState.module())) {
-                    modulesByPackage.putIfAbsent(pkg, module);
+            // skip java.base for memory efficiency (everyone reads it)
+            if (module != javaBase) {
+                Set<String> packages = module.getPackages();
+                for (String pkg : packages) {
+                    if (module.isExported(pkg, linkState.module())) {
+                        modulesByPackage.putIfAbsent(pkg, module);
+                    }
                 }
             }
         }
