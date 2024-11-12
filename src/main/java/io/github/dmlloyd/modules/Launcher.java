@@ -42,7 +42,9 @@ public final class Launcher implements Runnable {
                 }
                 ModuleLoader jarLoader = new DelegatingModuleLoader("launcher", jarFinder, loader);
                 LoadedModule loaded = jarLoader.loadModule(jarFinder.descriptor().name());
-                bootModule = loaded == null ? null : loaded.module();
+                // we gave the name that we got from the finder
+                assert loaded != null;
+                bootModule = loaded.module();
                 mainClassName = jarFinder.descriptor().mainClass().orElseThrow(NoSuchElementException::new);
             }
             case MODULE -> {
