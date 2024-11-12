@@ -29,6 +29,16 @@ final class Util {
 
     private Util() {}
 
+    public static String packageName(String className) {
+        int idx = className.lastIndexOf('.');
+        return idx == -1 ? "" : className.substring(0, idx);
+    }
+
+    public static String resourcePackageName(String resourcePath) {
+        int idx = resourcePath.lastIndexOf('/');
+        return idx == -1 ? "" : resourcePath.substring(0, idx).replace('/', '.');
+    }
+
     public static <T> Enumeration<T> enumeration(Iterator<T> iterator) {
         return new Enumeration<T>() {
             public boolean hasMoreElements() {

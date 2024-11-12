@@ -131,15 +131,13 @@ public class ModuleClassLoader extends ClassLoader {
     @Override
     protected final Class<?> loadClass(final String name, final boolean resolve) throws ClassNotFoundException {
         if (name.startsWith("[")) {
-            return loadClassFromDescriptor(name);
+            return loadClassFromDescriptor(name, 0);
         }
         String dotName = name.replace('/', '.');
-        int lastDot = dotName.lastIndexOf('.');
-        if (lastDot == - 1) {
+        String packageName = Util.packageName(dotName);
+        if (packageName.isEmpty()) {
             return loadClassDirect(name);
-        } else {
         }
-        String packageName = dotName.substring(0, lastDot);
         if (javaBase.getPackages().contains(packageName)) {
             // -> BootLoader.loadClass(...)
             return Class.forName(javaBase, name);
@@ -267,16 +265,13 @@ public class ModuleClassLoader extends ClassLoader {
         if (resource.pathName().endsWith(".class")) {
             return resource;
         }
-
-        String dotName = resource.pathName().replace('/', '.');
-        int dot = dotName.lastIndexOf('.');
-        if (dot == - 1) {
-            return resource;
-        }
         if (caller == null || caller.getModule().getClassLoader() == this) {
             return resource;
         }
-        String pkgName = dotName.substring(0, dot);
+        String pkgName = Util.resourcePackageName(resource.pathName());
+        if (pkgName.isEmpty()) {
+            return resource;
+        }
         if (linkDefined().exportedPackages().contains(pkgName)) {
             return resource;
         }
@@ -296,15 +291,10 @@ public class ModuleClassLoader extends ClassLoader {
         if (pathName.endsWith(".class")) {
             return resources;
         }
-        String dotName = pathName.replace('/', '.');
-        int dot = dotName.lastIndexOf('.');
-        if (dot == - 1) {
-            return resources;
-        }
         if (caller == null || caller.getModule().getClassLoader() == this) {
             return resources;
         }
-        String pkgName = dotName.substring(0, dot);
+        String pkgName = Util.resourcePackageName(pathName);
         if (linkDefined().exportedPackages().contains(pkgName)) {
             return resources;
         }
@@ -330,28 +320,19 @@ public class ModuleClassLoader extends ClassLoader {
         if (loaded != null) {
             return loaded;
         }
-        String slashName = name.replace('.', '/');
-        int lastDot = dotName.lastIndexOf('.');
-        String packageName;
-        if (lastDot == - 1) {
-            packageName = "";
-        } else {
-            packageName = dotName.substring(0, lastDot);
-        }
+        String packageName = Util.packageName(dotName);
         LinkState.Linked linked = linkFull();
-        if (! linked.packages().contains(packageName)) {
+        if (! packageName.isEmpty() && ! linked.packages().contains(packageName)) {
             throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from this loader");
         }
 
-        String fullPath = slashName + ".class";
+        String fullPath = name.replace('.', '/') + ".class";
         try {
-            for (ResourceLoader loader : linked.resourceLoaders()) {
-                Resource resource = loader.findResource(fullPath);
-                if (resource != null) {
-                    // found it!
-                    ProtectionDomain pd = linked.cachedProtectionDomain(resource);
-                    return defineOrGetClass(dotName, resource, pd);
-                }
+            Resource resource = loadResourceDirect(fullPath);
+            if (resource != null) {
+                // found it!
+                ProtectionDomain pd = linked.cachedProtectionDomain(resource);
+                return defineOrGetClass(dotName, resource, pd);
             }
         } catch (IOException e) {
             throw new ClassNotFoundException("Failed to load " + dotName, e);
@@ -690,9 +671,31 @@ public class ModuleClassLoader extends ClassLoader {
                     // provides
                     linkInitial().provides().forEach(p -> mab.provides(
                         ClassDesc.of(p.serviceName()),
-                        p.withClasses().stream().map(ClassDesc::of).toArray(ClassDesc[]::new))
-                    );
-                    // and imported providers - TODO: descriptor phase
+                        p.withClasses().stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
+                    ));
+                    // and imported providers
+                    linkDependencies().loadedDependencies().forEach(lm -> {
+                        if (lm.classLoader() instanceof ModuleClassLoader mcl) {
+                            // get the services from the module
+                            mcl.linkInitial().provides().forEach(p -> {
+                                mab.provides(
+                                    ClassDesc.of(p.serviceName()),
+                                    p.withClasses().stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
+                                );
+                            });
+                        } else {
+                            Module module = lm.module();
+                            if (module != javaBase) {
+                                // (todo) check layer parentage
+                                module.getDescriptor().provides().forEach(p -> {
+                                    mab.provides(
+                                        ClassDesc.of(p.service()),
+                                        p.providers().stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
+                                    );
+                                });
+                            }
+                        }
+                    });
                 }
             ));
             zb.with(ModulePackagesAttribute.of(
@@ -705,18 +708,18 @@ public class ModuleClassLoader extends ClassLoader {
         return new MemoryResource("module-info.class", bytes);
     }
 
-    private Class<?> loadClassFromDescriptor(String descriptor) throws ClassNotFoundException {
-        return switch (descriptor.charAt(0)) {
+    private Class<?> loadClassFromDescriptor(String descriptor, int idx) throws ClassNotFoundException {
+        return switch (descriptor.charAt(idx)) {
             case 'B' -> byte.class;
             case 'C' -> char.class;
             case 'D' -> double.class;
             case 'F' -> float.class;
             case 'I' -> int.class;
             case 'J' -> long.class;
-            case 'L' -> loadClass(descriptor.substring(1, descriptor.length() - 1));
+            case 'L' -> loadClass(descriptor.substring(idx + 1, descriptor.length() - 1));
             case 'S' -> short.class;
             case 'Z' -> boolean.class;
-            case '[' -> loadClassFromDescriptor(descriptor.substring(1)).arrayType();
+            case '[' -> loadClassFromDescriptor(descriptor, idx + 1).arrayType();
             default -> throw new ClassNotFoundException("Invalid descriptor: " + descriptor);
         };
     }
@@ -726,9 +729,9 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private Class<?> defineOrGetClass(final String dotName, final ByteBuffer buffer, final ProtectionDomain pd) {
-        int lastDot = dotName.lastIndexOf('.');
-        if (lastDot != -1) {
-            loadPackageDirect(dotName.substring(0, lastDot));
+        String packageName = Util.packageName(dotName);
+        if (! packageName.isEmpty()) {
+            loadPackageDirect(packageName);
         }
         try {
             return defineClass(dotName, buffer, pd);
