@@ -25,6 +25,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
@@ -488,6 +489,17 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
+    private <I, O> O doLocked(BiFunction<ModuleClassLoader, I, O> operation, I input) {
+        assert ! locked();
+        ReentrantLock lock = linkLock;
+        lock.lock();
+        try {
+            return operation.apply(this, input);
+        } finally {
+            lock.unlock();
+        }
+    }
+
     private LinkState.Initial linkInitial() {
         LinkState linkState = this.linkState;
         if (linkState instanceof LinkState.Initial state) {
@@ -497,8 +509,28 @@ public class ModuleClassLoader extends ClassLoader {
         throw new IllegalStateException("Module " + moduleName + " has been unloaded");
     }
 
-    private LinkState.Defined linkDefined() {
+    private LinkState.Dependencies linkDependencies() {
         LinkState.Initial linkState = linkInitial();
+        if (linkState instanceof LinkState.Dependencies deps) {
+            return deps;
+        }
+        List<LoadedModule> loadedDependencies = linkState.dependencies().stream().map(d -> d.moduleLoader().orElse(moduleLoader).loadModule(d.moduleName())).toList();
+        return doLocked(ModuleClassLoader::linkDependenciesLocked, loadedDependencies);
+    }
+
+    private LinkState.Dependencies linkDependenciesLocked(List<LoadedModule> loadedDependencies) {
+        LinkState.Initial linkState = linkInitial();
+        if (linkState instanceof LinkState.Dependencies deps) {
+            return deps;
+        }
+        log.debugf("Linking module %s to dependencies state", moduleName);
+        LinkState.Dependencies newState = new LinkState.Dependencies(linkState, loadedDependencies);
+        this.linkState = newState;
+        return newState;
+    }
+
+    private LinkState.Defined linkDefined() {
+        LinkState.Initial linkState = linkDependencies();
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }
@@ -506,7 +538,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private LinkState.Defined linkDefinedLocked() {
-        LinkState.Initial linkState = linkInitial();
+        LinkState.Dependencies linkState = linkDependencies();
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }

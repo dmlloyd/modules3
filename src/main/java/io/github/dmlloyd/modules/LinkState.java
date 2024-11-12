@@ -50,8 +50,8 @@ abstract class LinkState {
             this.provides = provides;
         }
 
-        Initial(final Initial initial) {
-            this(initial.dependencies, initial.resourceLoaders, initial.exports, initial.opens, initial.packages, initial.modifiers, initial.uses, initial.provides);
+        Initial(final Initial other) {
+            this(other.dependencies, other.resourceLoaders, other.exports, other.opens, other.packages, other.modifiers, other.uses, other.provides);
         }
 
         List<Dependency> dependencies() {
@@ -87,18 +87,35 @@ abstract class LinkState {
         }
     }
 
-    static class Defined extends Initial {
+    static class Dependencies extends Initial {
+        private final List<LoadedModule> loadedDependencies;
+
+        Dependencies(final Initial other, final List<LoadedModule> loadedDependencies) {
+            super(other);
+            this.loadedDependencies = loadedDependencies;
+        }
+
+        Dependencies(Dependencies other) {
+            this(other, other.loadedDependencies);
+        }
+
+        List<LoadedModule> loadedDependencies() {
+            return loadedDependencies;
+        }
+    }
+
+    static class Defined extends Dependencies {
         private final Module module;
         private final ModuleLayer.Controller layerController;
         private final Set<String> exportedPackages;
 
         Defined(
-            final Initial initial,
+            final Dependencies other,
             final Module module,
             final ModuleLayer.Controller layerController,
             final Set<String> exportedPackages
         ) {
-            super(initial);
+            super(other);
             this.module = module;
             this.layerController = layerController;
             this.exportedPackages = exportedPackages;
