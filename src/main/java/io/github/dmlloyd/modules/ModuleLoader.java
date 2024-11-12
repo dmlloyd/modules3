@@ -3,7 +3,6 @@ package io.github.dmlloyd.modules;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -23,6 +22,7 @@ public class ModuleLoader implements Closeable {
     private volatile boolean closed;
 
     private static final Module javaBase = Object.class.getModule();
+    private static final LoadedModule loadedJavaBase = LoadedModule.forModule(javaBase);
 
     public ModuleLoader(final String name, final ModuleFinder moduleFinder) {
         this.name = Assert.checkNotNullParam("name", name);
@@ -46,12 +46,12 @@ public class ModuleLoader implements Closeable {
      * @param moduleName the module name (must not be {@code null})
      * @return the loaded module, or {@code null} if the module is not found by this loader
      */
-    public final Module loadModule(final String moduleName) {
+    public final LoadedModule loadModule(final String moduleName) {
         if (closed) {
             throw new IllegalStateException(this + " is closed");
         }
         if (moduleName.equals("java.base")) {
-            return javaBase;
+            return loadedJavaBase;
         } else {
             return doLoadModule(moduleName);
         }
@@ -100,9 +100,9 @@ public class ModuleLoader implements Closeable {
      * @param moduleName the name of the module to load (not {@code null})
      * @return the loaded module, or {@code null} if no module was found for the given name
      */
-    protected Module doLoadModule(final String moduleName) {
+    protected LoadedModule doLoadModule(final String moduleName) {
         ModuleClassLoader loaded = findModuleLocal(moduleName);
-        return loaded == null ? null : loaded.module();
+        return loaded == null ? null : LoadedModule.forModuleClassLoader(loaded);
     }
 
     /**
@@ -206,13 +206,8 @@ public class ModuleLoader implements Closeable {
 
     public static ModuleLoader forLayer(String name, ModuleLayer layer) {
         return new ModuleLoader(name, ModuleFinder.EMPTY) {
-            public Module doLoadModule(final String moduleName) {
-                Optional<Module> result = layer.findModule(moduleName);
-                if (result.isPresent()) {
-                    return result.get();
-                } else {
-                    return null;
-                }
+            public LoadedModule doLoadModule(final String moduleName) {
+                return layer.findModule(moduleName).map(LoadedModule::forModule).orElse(null);
             }
         };
     }

@@ -34,8 +34,8 @@ public final class DelegatingModuleLoader extends ModuleLoader {
         Assert.checkNotNullParam("delegate", delegate);
     }
 
-    public Module doLoadModule(final String moduleName) {
-        Module module;
+    protected LoadedModule doLoadModule(final String moduleName) {
+        LoadedModule module;
         ModuleClassLoader loader = findModuleLocal(moduleName);
         if (loader == null) {
             ModuleLoader delegate = delegateFn.apply(moduleName);
@@ -44,7 +44,7 @@ public final class DelegatingModuleLoader extends ModuleLoader {
             }
             module = delegate.loadModule(moduleName);
         } else {
-            module = loader.module();
+            module = LoadedModule.forModuleClassLoader(loader);
         }
         return module;
     }

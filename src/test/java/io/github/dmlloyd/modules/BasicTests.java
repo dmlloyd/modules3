@@ -45,10 +45,10 @@ public final class BasicTests {
                 ) : null;
             }
         }, ModuleLoader.BOOT);
-        Module resolved = ml.loadModule("hello");
+        LoadedModule resolved = ml.loadModule("hello");
         assertNotNull(resolved);
-        assertNotNull(resolved.getClassLoader().loadClass("java.lang.Object"));
-        assertEquals("1.2.3", resolved.getDescriptor().rawVersion().orElseThrow(NullPointerException::new));
+        assertNotNull(resolved.classLoader().loadClass("java.lang.Object"));
+        assertEquals("1.2.3", resolved.module().getDescriptor().rawVersion().orElseThrow(NullPointerException::new));
     }
 
     @Test

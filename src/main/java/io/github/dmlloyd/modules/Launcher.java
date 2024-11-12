@@ -41,7 +41,8 @@ public final class Launcher implements Runnable {
                     throw new ModuleLoadException("Failed to open boot module JAR \"" + launchName + "\"", e);
                 }
                 ModuleLoader jarLoader = new DelegatingModuleLoader("launcher", jarFinder, loader);
-                bootModule = jarLoader.loadModule(jarFinder.descriptor().name());
+                LoadedModule loaded = jarLoader.loadModule(jarFinder.descriptor().name());
+                bootModule = loaded == null ? null : loaded.module();
                 mainClassName = jarFinder.descriptor().mainClass().orElseThrow(NoSuchElementException::new);
             }
             case MODULE -> {
@@ -52,10 +53,11 @@ public final class Launcher implements Runnable {
                 } else {
                     moduleName = launchName.substring(0, idx);
                 }
-                bootModule = loader.loadModule(moduleName);
-                if (bootModule == null) {
+                LoadedModule loaded = loader.loadModule(moduleName);
+                if (loaded == null) {
                     throw new ModuleLoadException("Failed to locate boot module \"" + moduleName + "\"");
                 }
+                bootModule = loaded.module();
                 if (idx == -1) {
                     mainClassName = bootModule.getDescriptor().mainClass().orElseThrow(IllegalArgumentException::new);
                 } else {

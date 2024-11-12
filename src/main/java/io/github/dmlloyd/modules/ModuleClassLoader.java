@@ -553,11 +553,11 @@ public class ModuleClassLoader extends ClassLoader {
         List<Module> loaders = new ArrayList<>(dependencies.size());
         for (Dependency dependency : dependencies) {
             String depName = dependency.moduleName();
-            Module resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
+            LoadedModule resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
             if (resolved != null) {
                 // link to it
-                linkState.layerController().addReads(linkState.module(), resolved);
-                loaders.add(resolved);
+                linkState.layerController().addReads(linkState.module(), resolved.module());
+                loaders.add(resolved.module());
             } else if (! dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
                 throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
             }
@@ -584,9 +584,9 @@ public class ModuleClassLoader extends ClassLoader {
             if (export.targets().isPresent()) {
                 // seek out targets
                 for (String target : export.targets().get()) {
-                    Module resolved = moduleLoader().doLoadModule(target);
+                    LoadedModule resolved = moduleLoader().doLoadModule(target);
                     if (resolved != null) {
-                        linkState.layerController().addExports(linkState.module(), export.packageName(), resolved);
+                        linkState.layerController().addExports(linkState.module(), export.packageName(), resolved.module());
                     }
                 }
             }
@@ -595,9 +595,9 @@ public class ModuleClassLoader extends ClassLoader {
             if (open.targets().isPresent()) {
                 // seek out targets
                 for (String target : open.targets().get()) {
-                    Module resolved = moduleLoader().doLoadModule(target);
+                    LoadedModule resolved = moduleLoader().doLoadModule(target);
                     if (resolved != null) {
-                        linkState.layerController().addOpens(linkState.module(), open.packageName(), resolved);
+                        linkState.layerController().addOpens(linkState.module(), open.packageName(), resolved.module());
                     }
                 }
             }
@@ -660,6 +660,7 @@ public class ModuleClassLoader extends ClassLoader {
                         ClassDesc.of(p.serviceName()),
                         p.withClasses().stream().map(ClassDesc::of).toArray(ClassDesc[]::new))
                     );
+                    // and imported providers - TODO: descriptor phase
                 }
             ));
             zb.with(ModulePackagesAttribute.of(
