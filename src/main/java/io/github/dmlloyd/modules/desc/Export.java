@@ -25,6 +25,16 @@ public record Export(
     }
 
     /**
+     * Construct a new instance with no modifiers.
+     * The package is exported unconditionally.
+     *
+     * @param packageName the package name (must not be {@code null})
+     */
+    public Export(String packageName) {
+        this(packageName, Modifiers.of(), Optional.empty());
+    }
+
+    /**
      * The modifier flags for exports.
      */
     public enum Modifier implements ModifierFlag {

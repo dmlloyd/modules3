@@ -36,7 +36,7 @@ public final class BasicTests {
                             Optional.empty()
                         )
                     ),
-                    Set.of(new Export("test.foobar", Modifiers.of(), Optional.empty())),
+                    Set.of(new Export("test.foobar")),
                     Set.of(),
                     Set.of(RandomGenerator.class.getName()),
                     Set.of(),

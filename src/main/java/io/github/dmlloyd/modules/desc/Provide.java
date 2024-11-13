@@ -15,4 +15,8 @@ public record Provide(
         Assert.checkNotNullParam("serviceName", serviceName);
         withClasses = List.copyOf(withClasses);
     }
+
+    public Provide(String serviceName, String withClass) {
+        this(serviceName, List.of(withClass));
+    }
 }

@@ -25,6 +25,16 @@ public record Open(
     }
 
     /**
+     * Construct a new instance with no modifiers.
+     * The package is opened unconditionally.
+     *
+     * @param packageName the package name (must not be {@code null})
+     */
+    public Open(final String packageName) {
+        this(packageName, Modifiers.of(), Optional.empty());
+    }
+
+    /**
      * The modifier flags for opens.
      */
     public enum Modifier implements ModifierFlag {
