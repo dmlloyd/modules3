@@ -1,7 +1,9 @@
 package io.github.dmlloyd.modules.desc;
 
+import java.net.URI;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -34,12 +36,13 @@ public record ModuleDescriptor(
     Optional<String> classLoaderName,
     Modifiers<Modifier> modifiers,
     Optional<String> mainClass,
+    Optional<URI> location,
     Function<ModuleClassLoader.ClassLoaderConfiguration, ModuleClassLoader> classLoaderFactory,
     List<Dependency> dependencies,
     Set<Export> exports,
     Set<Open> opens,
     Set<String> uses,
-    Set<Provide> provides,
+    Map<String, List<String>> provides,
     List<ResourceLoaderOpener> resourceLoaderOpeners,
     Set<String> packages
 ) {
@@ -50,12 +53,13 @@ public record ModuleDescriptor(
         Assert.checkNotNullParam("classLoaderName", classLoaderName);
         Assert.checkNotNullParam("modifiers", modifiers);
         Assert.checkNotNullParam("mainClass", mainClass);
+        Assert.checkNotNullParam("location", location);
         Assert.checkNotNullParam("classLoaderFactory", classLoaderFactory);
         dependencies = List.copyOf(dependencies);
         exports = Set.copyOf(exports);
         opens = Set.copyOf(opens);
         uses = Set.copyOf(uses);
-        provides = Set.copyOf(provides);
+        provides = Map.copyOf(provides);
         resourceLoaderOpeners = List.copyOf(resourceLoaderOpeners);
         packages = Set.copyOf(packages);
     }
@@ -67,6 +71,7 @@ public record ModuleDescriptor(
             classLoaderName,
             modifiers,
             mainClass,
+            location,
             classLoaderFactory,
             dependencies,
             exports,
@@ -85,12 +90,17 @@ public record ModuleDescriptor(
         /**
          * Enable native access for this module.
          */
-        ENABLE_NATIVE_ACCESS,
+        NATIVE_ACCESS,
         /**
          * The entire module is open for reflective access.
          * Not recommended.
          */
         OPEN,
+        /**
+         * Define the module as an "unnamed" module, which
+         * reads all modules.
+         */
+        UNNAMED,
     }
 
     /**
@@ -120,7 +130,7 @@ public record ModuleDescriptor(
             RuntimeVisibleAnnotationsAttribute a = rva.get();
             Optional<Annotation> opt = a.annotations().stream().filter(an -> an.className().equalsString(NativeAccess.class.getName())).findAny();
             if (opt.isPresent()) {
-                mods = mods.with(Modifier.ENABLE_NATIVE_ACCESS);
+                mods = mods.with(Modifier.NATIVE_ACCESS);
             }
         }
         return new ModuleDescriptor(
@@ -129,6 +139,7 @@ public record ModuleDescriptor(
             Optional.empty(),
             mods,
             mca.map(ModuleMainClassAttribute::mainClass).map(ClassEntry::name).map(Utf8Entry::stringValue).map(s -> s.replace('/', '.')),
+            Optional.empty(),
             ModuleClassLoader::new,
             ma.requires().stream().map(
                 r -> new Dependency(
@@ -161,14 +172,12 @@ public record ModuleDescriptor(
             ).collect(Collectors.toUnmodifiableSet()),
             ma.uses().stream().map(ClassEntry::name).map(Utf8Entry::stringValue).collect(Collectors.toUnmodifiableSet()),
             ma.provides().stream().map(
-                mpi -> new Provide(
-                    mpi.provides().name().stringValue(),
+                mpi -> Map.entry(mpi.provides().name().stringValue(),
                     mpi.providesWith().stream()
                         .map(ClassEntry::name)
                         .map(Utf8Entry::stringValue)
-                        .toList()
-                )
-            ).collect(Collectors.toUnmodifiableSet()),
+                        .toList())
+            ).collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue)),
             List.of(),
             mpa.map(ModulePackagesAttribute::packages).map(p -> p.stream()
                 .map(PackageEntry::name)

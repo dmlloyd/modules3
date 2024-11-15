@@ -12,6 +12,7 @@ import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReader;
 import java.lang.module.ModuleReference;
 import java.lang.reflect.UndeclaredThrowableException;
+import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.security.ProtectionDomain;
@@ -44,7 +45,6 @@ import io.github.dmlloyd.modules.desc.Export;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.Open;
-import io.github.dmlloyd.modules.desc.Provide;
 import io.smallrye.common.resource.MemoryResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -98,7 +98,8 @@ public class ModuleClassLoader extends ClassLoader {
             config.packages(),
             config.modifiers(),
             config.uses(),
-            config.provides()
+            config.provides(),
+            config.location()
         );
     }
 
@@ -515,44 +516,53 @@ public class ModuleClassLoader extends ClassLoader {
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }
-        return doLocked(ModuleClassLoader::linkDefinedLocked);
+        java.lang.module.ModuleDescriptor descriptor;
+        Resource moduleInfo = loadModuleInfo();
+        try (InputStream is = moduleInfo.openStream()) {
+            descriptor = java.lang.module.ModuleDescriptor.read(is);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return doLocked(ModuleClassLoader::linkDefinedLocked, descriptor);
     }
 
-    private LinkState.Defined linkDefinedLocked() {
+    private LinkState.Defined linkDefinedLocked(java.lang.module.ModuleDescriptor descriptor) {
         LinkState.Dependencies linkState = linkDependencies();
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }
         log.debugf("Linking module %s to defined state", moduleName);
-        // all the stuff that the JDK needs to have a module
-        java.lang.module.ModuleDescriptor descriptor;
-        try (InputStream is = loadModuleInfo().openStream()) {
-            descriptor = java.lang.module.ModuleDescriptor.read(is);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        ModuleReference modRef = new ModuleReference(descriptor, null) {
-            public ModuleReader open() {
-                throw new UnsupportedOperationException();
+        Set<String> exportedPackages = linkState.exports().stream().filter(e -> e.targets().isEmpty()).map(Export::packageName).collect(Collectors.toUnmodifiableSet());
+        LinkState.Defined defined;
+        if (linkState.modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
+            // nothing needed
+            defined = new LinkState.Defined(linkState, getUnnamedModule(), null, exportedPackages);
+        } else {
+            // all the stuff that the JDK needs to have a module
+            URI uri = linkState.location();
+            ModuleReference modRef = new ModuleReference(descriptor, uri) {
+                public ModuleReader open() {
+                    throw new UnsupportedOperationException();
+                }
+            };
+            final Configuration cf = ModuleLayer.boot().configuration().resolve(
+                new SingleModuleFinder(modRef),
+                Util.EMPTY_MF,
+                List.of(moduleName)
+            );
+            ModuleLayer.Controller ctl = ModuleLayer.defineModules(cf, List.of(ModuleLayer.boot()), __ -> this);
+            ModuleLayer moduleLayer = ctl.layer();
+            Module module = moduleLayer.findModule(moduleName).orElseThrow(IllegalStateException::new);
+            if (linkState.modifiers().contains(ModuleDescriptor.Modifier.NATIVE_ACCESS)) {
+                NativeAccessImpl.enableNativeAccess(ctl, module);
             }
-        };
-        final Configuration cf = ModuleLayer.boot().configuration().resolve(
-            new SingleModuleFinder(modRef),
-            Util.EMPTY_MF,
-            List.of(moduleName)
-        );
-        ModuleLayer.Controller ctl = ModuleLayer.defineModules(cf, List.of(ModuleLayer.boot()), __ -> this);
-        ModuleLayer moduleLayer = ctl.layer();
-        Module module = moduleLayer.findModule(moduleName).orElseThrow(IllegalStateException::new);
-        if (linkState.modifiers().contains(ModuleDescriptor.Modifier.ENABLE_NATIVE_ACCESS)) {
-            NativeAccessImpl.enableNativeAccess(ctl, module);
+            defined = new LinkState.Defined(
+                linkState,
+                module,
+                ctl,
+                exportedPackages
+            );
         }
-        LinkState.Defined defined = new LinkState.Defined(
-            linkState,
-            module,
-            ctl,
-            linkState.exports().stream().filter(e -> e.targets().isEmpty()).map(Export::packageName).collect(Collectors.toUnmodifiableSet())
-        );
         this.linkState = defined;
         return defined;
     }
@@ -569,7 +579,7 @@ public class ModuleClassLoader extends ClassLoader {
             LoadedModule resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
             if (resolved != null) {
                 // link to it
-                linkState.layerController().addReads(linkState.module(), resolved.module());
+                linkState.addReads(resolved.module());
                 loaders.add(resolved.module());
             } else if (! dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
                 throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
@@ -599,7 +609,7 @@ public class ModuleClassLoader extends ClassLoader {
                 for (String target : export.targets().get()) {
                     LoadedModule resolved = moduleLoader().doLoadModule(target);
                     if (resolved != null) {
-                        linkState.layerController().addExports(linkState.module(), export.packageName(), resolved.module());
+                        linkState.addExports(export.packageName(), resolved.module());
                     }
                 }
             }
@@ -610,7 +620,7 @@ public class ModuleClassLoader extends ClassLoader {
                 for (String target : open.targets().get()) {
                     LoadedModule resolved = moduleLoader().doLoadModule(target);
                     if (resolved != null) {
-                        linkState.layerController().addOpens(linkState.module(), open.packageName(), resolved.module());
+                        linkState.addOpens(open.packageName(), resolved.module());
                     }
                 }
             }
@@ -669,18 +679,18 @@ public class ModuleClassLoader extends ClassLoader {
                     // uses
                     linkInitial().uses().forEach(clz -> mab.uses(ClassDesc.of(clz)));
                     // provides
-                    linkInitial().provides().forEach(p -> mab.provides(
-                        ClassDesc.of(p.serviceName()),
-                        p.withClasses().stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
+                    linkInitial().provides().forEach((svc, impls) -> mab.provides(
+                        ClassDesc.of(svc),
+                        impls.stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
                     ));
                     // and imported providers
                     linkDependencies().loadedDependencies().forEach(lm -> {
                         if (lm.classLoader() instanceof ModuleClassLoader mcl) {
                             // get the services from the module
-                            mcl.linkInitial().provides().forEach(p -> {
+                            mcl.linkInitial().provides().forEach((svc, impls) -> {
                                 mab.provides(
-                                    ClassDesc.of(p.serviceName()),
-                                    p.withClasses().stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
+                                    ClassDesc.of(svc),
+                                    impls.stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
                                 );
                             });
                         } else {
@@ -872,7 +882,8 @@ public class ModuleClassLoader extends ClassLoader {
         private final Set<String> packages;
         private final Modifiers<ModuleDescriptor.Modifier> modifiers;
         private final Set<String> uses;
-        private final Set<Provide> provides;
+        private final Map<String, List<String>> provides;
+        private final URI location;
 
         ClassLoaderConfiguration(
             ModuleLoader moduleLoader,
@@ -886,7 +897,8 @@ public class ModuleClassLoader extends ClassLoader {
             Set<String> packages,
             Modifiers<ModuleDescriptor.Modifier> modifiers,
             Set<String> uses,
-            Set<Provide> provides
+            Map<String, List<String>> provides,
+            URI location
         ) {
             this.moduleLoader = moduleLoader;
             this.classLoaderName = classLoaderName;
@@ -900,6 +912,7 @@ public class ModuleClassLoader extends ClassLoader {
             this.modifiers = modifiers;
             this.uses = uses;
             this.provides = provides;
+            this.location = location;
         }
 
         ModuleLoader moduleLoader() {
@@ -946,8 +959,12 @@ public class ModuleClassLoader extends ClassLoader {
             return uses;
         }
 
-        Set<Provide> provides() {
+        Map<String, List<String>> provides() {
             return provides;
+        }
+
+        URI location() {
+            return location;
         }
     }
 
@@ -1007,6 +1024,9 @@ public class ModuleClassLoader extends ClassLoader {
         private NativeAccessImpl() {}
 
         static void enableNativeAccess(final ModuleLayer.Controller ctl, final Module module) {
+            if (ctl == null) {
+                return;
+            }
             try {
                 // force correct method signature
                 var ignored = (ModuleLayer.Controller) handle.invokeExact(ctl, module);

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.random.RandomGenerator;
@@ -28,6 +29,7 @@ public final class BasicTests {
                     Optional.of("test"),
                     Modifiers.of(),
                     Optional.empty(),
+                    Optional.empty(),
                     ModuleClassLoader::new,
                     List.of(
                         new Dependency(
@@ -38,8 +40,8 @@ public final class BasicTests {
                     ),
                     Set.of(new Export("test.foobar")),
                     Set.of(),
-                    Set.of(RandomGenerator.class.getName()),
-                    Set.of(),
+                    Set.of(RandomGenerator.class.getName(), "java.lang.Unknown"),
+                    Map.of("java.lang.Nothing", List.of("test.foobar.NonExistent")),
                     List.of(),
                     Set.of("test.foobar", "test.foobar.impl")
                 ) : null;

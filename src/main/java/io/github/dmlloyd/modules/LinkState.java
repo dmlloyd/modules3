@@ -1,10 +1,12 @@
 package io.github.dmlloyd.modules;
 
+import java.net.URI;
 import java.security.CodeSigner;
 import java.security.CodeSource;
 import java.security.ProtectionDomain;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -13,7 +15,6 @@ import io.github.dmlloyd.modules.desc.Export;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.Open;
-import io.github.dmlloyd.modules.desc.Provide;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
 
@@ -37,9 +38,10 @@ abstract class LinkState {
         private final Set<String> packages;
         private final Modifiers<ModuleDescriptor.Modifier> modifiers;
         private final Set<String> uses;
-        private final Set<Provide> provides;
+        private final Map<String, List<String>> provides;
+        private final URI location;
 
-        Initial(final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Set<Export> exports, final Set<Open> opens, final Set<String> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Set<Provide> provides) {
+        Initial(final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Set<Export> exports, final Set<Open> opens, final Set<String> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Map<String, List<String>> provides, final URI location) {
             this.dependencies = dependencies;
             this.resourceLoaders = resourceLoaders;
             this.exports = exports;
@@ -48,10 +50,11 @@ abstract class LinkState {
             this.modifiers = modifiers;
             this.uses = uses;
             this.provides = provides;
+            this.location = location;
         }
 
         Initial(final Initial other) {
-            this(other.dependencies, other.resourceLoaders, other.exports, other.opens, other.packages, other.modifiers, other.uses, other.provides);
+            this(other.dependencies, other.resourceLoaders, other.exports, other.opens, other.packages, other.modifiers, other.uses, other.provides, other.location);
         }
 
         List<Dependency> dependencies() {
@@ -82,8 +85,12 @@ abstract class LinkState {
             return uses;
         }
 
-        Set<Provide> provides() {
+        Map<String, List<String>> provides() {
             return provides;
+        }
+
+        URI location() {
+            return location;
         }
     }
 
@@ -129,8 +136,16 @@ abstract class LinkState {
             return module;
         }
 
-        ModuleLayer.Controller layerController() {
-            return layerController;
+        void addReads(final Module target) {
+            layerController.addReads(module, target);
+        }
+
+        void addExports(final String pn, final Module target) {
+            layerController.addExports(module, pn, target);
+        }
+
+        void addOpens(final String pn, final Module target) {
+            layerController.addOpens(module, pn, target);
         }
 
         Set<String> exportedPackages() {

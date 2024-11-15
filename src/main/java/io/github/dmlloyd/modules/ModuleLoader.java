@@ -186,7 +186,8 @@ public class ModuleLoader implements Closeable {
                     desc.packages(),
                     desc.modifiers(),
                     desc.uses(),
-                    desc.provides()
+                    desc.provides(),
+                    desc.location().orElse(null)
                 ));
                 if (loader == null) {
                     throw new NullPointerException("Class loader factory " + desc.classLoaderFactory() + " returned null for apply()");
