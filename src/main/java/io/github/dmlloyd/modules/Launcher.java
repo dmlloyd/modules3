@@ -129,7 +129,7 @@ public final class Launcher implements Runnable {
     public static int main(List<String> args) {
         args = List.copyOf(args);
         Iterator<String> iterator = args.iterator();
-        List<Path> modulePath = List.of();
+        List<Path> modulePath = List.of(Path.of("."));
         Mode mode = Mode.MODULE;
         boolean infoOnly = false;
         while (iterator.hasNext()) {
@@ -172,7 +172,7 @@ public final class Launcher implements Runnable {
                         System.err.flush();
                         return 1;
                     }
-                    modulePath = Stream.of(argument.split(File.pathSeparator)).map(Path::of).toList();
+                    modulePath = Stream.of(iterator.next().split(File.pathSeparator)).map(Path::of).toList();
                 }
                 case "--jar" -> {
                     if (mode != Mode.MODULE) {

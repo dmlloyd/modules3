@@ -6,7 +6,6 @@ import java.security.CodeSource;
 import java.security.ProtectionDomain;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -96,18 +95,24 @@ abstract class LinkState {
 
     static class Dependencies extends Initial {
         private final List<LoadedModule> loadedDependencies;
+        private final Map<String, List<String>> providedServices;
 
-        Dependencies(final Initial other, final List<LoadedModule> loadedDependencies) {
+        Dependencies(final Initial other, final List<LoadedModule> loadedDependencies, final Map<String, List<String>> providedServices) {
             super(other);
             this.loadedDependencies = loadedDependencies;
+            this.providedServices = providedServices;
         }
 
         Dependencies(Dependencies other) {
-            this(other, other.loadedDependencies);
+            this(other, other.loadedDependencies, other.providedServices);
         }
 
         List<LoadedModule> loadedDependencies() {
             return loadedDependencies;
+        }
+
+        Map<String, List<String>> providedServices() {
+            return providedServices;
         }
     }
 
@@ -137,15 +142,29 @@ abstract class LinkState {
         }
 
         void addReads(final Module target) {
-            layerController.addReads(module, target);
+            if (layerController != null) {
+                layerController.addReads(module, target);
+            }
         }
 
         void addExports(final String pn, final Module target) {
-            layerController.addExports(module, pn, target);
+            if (layerController != null) {
+                layerController.addExports(module, pn, target);
+            }
         }
 
         void addOpens(final String pn, final Module target) {
-            layerController.addOpens(module, pn, target);
+            if (layerController != null) {
+                layerController.addOpens(module, pn, target);
+            }
+        }
+
+        void addUses(final Class<?> service) {
+            try {
+                module.getClassLoader().loadClass("$internal.Utils").getDeclaredMethod("use", Class.class).invoke(null, service);
+            } catch (Exception e) {
+                throw new IllegalStateException("Unexpected failure", e);
+            }
         }
 
         Set<String> exportedPackages() {

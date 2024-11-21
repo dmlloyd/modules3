@@ -1,9 +1,12 @@
 package io.github.dmlloyd.modules;
 
+import static java.lang.constant.ConstantDescs.*;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.lang.constant.ClassDesc;
+import java.lang.constant.MethodTypeDesc;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -15,8 +18,10 @@ import java.lang.reflect.UndeclaredThrowableException;
 import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.ProtectionDomain;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -54,6 +59,8 @@ import org.jboss.logging.Logger;
  * A class loader for a module.
  */
 public class ModuleClassLoader extends ClassLoader {
+
+    public static final ClassDesc CD_Module = ClassDesc.of("java.lang.Module");
 
     static {
         if (! ClassLoader.registerAsParallelCapable()) {
@@ -136,7 +143,7 @@ public class ModuleClassLoader extends ClassLoader {
         }
         String dotName = name.replace('/', '.');
         String packageName = Util.packageName(dotName);
-        if (packageName.isEmpty()) {
+        if (packageName.isEmpty() || packageName.equals("$internal")) {
             return loadClassDirect(name);
         }
         if (javaBase.getPackages().contains(packageName)) {
@@ -323,6 +330,27 @@ public class ModuleClassLoader extends ClassLoader {
         }
         String packageName = Util.packageName(dotName);
         LinkState.Linked linked = linkFull();
+        if (packageName.equals("$internal")) {
+            return switch (dotName) {
+                case "$internal.Utils" -> {
+                    ClassDesc utilsDesc = ClassDesc.of("$internal.Utils");
+                    yield defineOrGetClass(dotName, ByteBuffer.wrap(ClassFile.of().build(utilsDesc, zb -> {
+                        zb.withVersion(ClassFile.JAVA_17_VERSION, 0);
+                        zb.withSuperclass(CD_Object);
+                        zb.withMethod("use", MethodTypeDesc.of(CD_void, CD_Class), ClassFile.ACC_PRIVATE | ClassFile.ACC_STATIC, mb -> {
+                            mb.withCode(cb -> {
+                                cb.ldc(utilsDesc);
+                                cb.invokevirtual(CD_Class, "getModule", MethodTypeDesc.of(CD_Module));
+                                cb.aload(cb.parameterSlot(0));
+                                cb.invokevirtual(CD_Module, "addUses", MethodTypeDesc.of(CD_Module, CD_Class));
+                                cb.return_();
+                            });
+                        });
+                    })), null);
+                }
+                default -> throw new ClassNotFoundException("Invalid internal class");
+            };
+        }
         if (! packageName.isEmpty() && ! linked.packages().contains(packageName)) {
             throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from this loader");
         }
@@ -342,9 +370,13 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     final Resource loadResourceDirect(final String name) throws IOException {
+        // TODO: canonicalize
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
             return loadModuleInfo();
+        }
+        if (name.startsWith("META-INF/services/") && name.lastIndexOf('/') == 17) {
+            return loadServicesFileDirect(name);
         }
         for (ResourceLoader loader : linkInitial().resourceLoaders()) {
             Resource resource = loader.findResource(name);
@@ -356,9 +388,13 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     final List<Resource> loadResourcesDirect(final String name) throws IOException {
+        // TODO: canonicalize
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
             return List.of(loadModuleInfo());
+        }
+        if (name.startsWith("META-INF/services/") && name.lastIndexOf('/') == 17) {
+            return Optional.ofNullable(loadServicesFileDirect(name)).map(List::of).orElse(List.of());
         }
         try {
             return linkInitial().resourceLoaders().stream().map(l -> {
@@ -371,6 +407,15 @@ public class ModuleClassLoader extends ClassLoader {
         } catch (UncheckedIOException e) {
             throw e.getCause();
         }
+    }
+
+    private Resource loadServicesFileDirect(final String name) {
+        List<String> services = linkDependencies().providedServices().getOrDefault(name.substring(17), List.of());
+        if (services.isEmpty()) {
+            return null;
+        }
+        String result = services.stream().collect(Collectors.joining("\n", "", "\n"));
+        return new MemoryResource(name, result.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String getAttribute(Attributes.Name name, Attributes packageAttribute, Attributes mainAttribute, String defVal) {
@@ -392,20 +437,23 @@ public class ModuleClassLoader extends ClassLoader {
         if (pkg != null) {
             return pkg;
         }
-        List<ResourceLoader> list = linkDefined().resourceLoaders();
         Manifest manifest = null;
         ResourceLoader loader = null;
-        for (ResourceLoader rl : list) {
-            try {
-                manifest = rl.manifest();
-            } catch (IOException e) {
-                throw new IllegalStateException("Failed to load manifest for package " + name, e);
-            }
-            if (manifest != null) {
-                loader = rl;
-                break;
+        if (! name.equals("$internal")) {
+            List<ResourceLoader> list = linkDefined().resourceLoaders();
+            for (ResourceLoader rl : list) {
+                try {
+                    manifest = rl.manifest();
+                } catch (IOException e) {
+                    throw new IllegalStateException("Failed to load manifest for package " + name, e);
+                }
+                if (manifest != null) {
+                    loader = rl;
+                    break;
+                }
             }
         }
+        // todo: change this to use the manifest of the JAR which contains the package
         String specTitle;
         String specVersion;
         String specVendor;
@@ -506,7 +554,17 @@ public class ModuleClassLoader extends ClassLoader {
             return deps;
         }
         log.debugf("Linking module %s to dependencies state", moduleName);
-        LinkState.Dependencies newState = new LinkState.Dependencies(linkState, loadedDependencies);
+        // todo: this is really stupid. maybe just do it the normal way?
+        Map<String, List<String>> depServices = loadedDependencies.stream().flatMap(lm ->
+            lm.classLoader() instanceof ModuleClassLoader mcl ?
+            mcl.linkInitial().provides().entrySet().stream() :
+            lm.module().getDescriptor().provides().stream().map(p -> Map.entry(p.service(), p.providers()))
+        ).collect(
+            Collectors.groupingBy(Map.Entry::getKey,
+                Collectors.mapping(Map.Entry::getValue,
+                    Collectors.flatMapping(Collection::stream,
+                        Collectors.toUnmodifiableList()))));
+        LinkState.Dependencies newState = new LinkState.Dependencies(linkState, loadedDependencies, Map.copyOf(depServices));
         this.linkState = newState;
         return newState;
     }
@@ -556,6 +614,7 @@ public class ModuleClassLoader extends ClassLoader {
             if (linkState.modifiers().contains(ModuleDescriptor.Modifier.NATIVE_ACCESS)) {
                 NativeAccessImpl.enableNativeAccess(ctl, module);
             }
+            ctl.addOpens(module, "$internal", getClass().getModule());
             defined = new LinkState.Defined(
                 linkState,
                 module,
@@ -683,6 +742,10 @@ public class ModuleClassLoader extends ClassLoader {
                         ClassDesc.of(svc),
                         impls.stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
                     ));
+                    // imported providers
+                    linkDependencies().providedServices().forEach((svc, impls) -> {
+
+                    });
                     // and imported providers
                     linkDependencies().loadedDependencies().forEach(lm -> {
                         if (lm.classLoader() instanceof ModuleClassLoader mcl) {
@@ -709,10 +772,12 @@ public class ModuleClassLoader extends ClassLoader {
                 }
             ));
             zb.with(ModulePackagesAttribute.of(
-                linkInitial().packages()
-                    .stream()
-                    .map(n -> zb.constantPool().packageEntry(PackageDesc.of(n)))
-                    .toList()
+                Stream.concat(
+                    linkInitial().packages().stream(),
+                    Stream.of("$internal")
+                )
+                .map(n -> zb.constantPool().packageEntry(PackageDesc.of(n)))
+                .toList()
             ));
         });
         return new MemoryResource("module-info.class", bytes);
