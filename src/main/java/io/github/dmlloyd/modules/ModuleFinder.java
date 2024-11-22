@@ -1,9 +1,11 @@
 package io.github.dmlloyd.modules;
 
+import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -11,6 +13,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
@@ -56,9 +62,12 @@ public interface ModuleFinder extends Closeable {
                         return null;
                     }
                     List<Path> items = null;
+                    Path moduleXml = null;
                     try (DirectoryStream<Path> ds = Files.newDirectoryStream(realPath)) {
                         for (Path subPath : ds) {
-                            if (subPath.getFileName().toString().endsWith(".jar") && Files.isRegularFile(subPath)) {
+                            if (subPath.getFileName().toString().equals("module.xml") && Files.isRegularFile(subPath)) {
+                                moduleXml = subPath;
+                            } else if (subPath.getFileName().toString().endsWith(".jar") && Files.isRegularFile(subPath)) {
                                 if (items == null) {
                                     // common case
                                     items = List.of(subPath);
@@ -93,6 +102,16 @@ public interface ModuleFinder extends Closeable {
                                 }
                             }
                             // now, find the module descriptor
+                            if (moduleXml != null) {
+                                try (BufferedReader br = Files.newBufferedReader(moduleXml, StandardCharsets.UTF_8)) {
+                                    XMLStreamReader xml = XMLInputFactory.newDefaultFactory().createXMLStreamReader(br);
+                                    try (XMLCloser ignored = xml::close) {
+                                        return ModuleDescriptor.fromXml(xml);
+                                    }
+                                } catch (XMLStreamException | IOException e) {
+                                    throw new ModuleLoadException("Failed to read module.xml file", e);
+                                }
+                            }
                             for (ResourceLoader resourceLoader : resourceLoaders) {
                                 Resource resource;
                                 try {
@@ -129,5 +148,9 @@ public interface ModuleFinder extends Closeable {
                 return null;
             }
         };
+    }
+
+    interface XMLCloser extends AutoCloseable {
+        void close() throws XMLStreamException;
     }
 }

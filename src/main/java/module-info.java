@@ -7,6 +7,7 @@ module io.github.dmlloyd.modules {
     requires io.github.dmlloyd.classfile;
     requires io.smallrye.common.constraint;
     requires io.smallrye.common.resource;
+    requires java.xml;
 
     exports io.github.dmlloyd.modules;
     exports io.github.dmlloyd.modules.desc;
