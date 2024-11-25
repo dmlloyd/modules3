@@ -363,7 +363,7 @@ public record ModuleDescriptor(
             switch (xml.nextTag()) {
                 case XMLStreamConstants.START_ELEMENT -> throw unknownElement(xml);
                 case XMLStreamConstants.END_ELEMENT -> {
-                    return new Dependency(name, modifiers, Optional.of());
+                    return new Dependency(name, modifiers, Optional.empty());
                 }
             }
         }
