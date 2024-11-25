@@ -149,6 +149,10 @@ public class ModuleClassLoader extends ClassLoader {
             return loadClassDirect(name);
         }
         if (javaBase.getPackages().contains(packageName)) {
+            if (dotName.equals("java.util.ServiceLoader")) {
+                // loading services! extra linking required
+                linkServices();
+            }
             // -> BootLoader.loadClass(...)
             return Class.forName(javaBase, name);
         }
@@ -713,11 +717,8 @@ public class ModuleClassLoader extends ClassLoader {
                 }
             }
         }
-        return doLocked(this_ -> this_.linkFullLocked(modulesByPackage));
+        return doLocked(ModuleClassLoader::linkFullLocked, modulesByPackage);
     }
-
-    // todo: add next link state: services (uses added)
-    // todo: provides cannot be dynamically added...
 
     private LinkState.Linked linkFullLocked(final Map<String, Module> modulesByPackage) {
         // double-check it inside the lock
@@ -732,6 +733,34 @@ public class ModuleClassLoader extends ClassLoader {
         );
         linkState = linked;
         return linked;
+    }
+
+    private LinkState.Services linkServices() {
+        LinkState.Linked linkState = linkFull();
+        if (linkState instanceof LinkState.Services srv) {
+            return srv;
+        }
+        for (String used : linkState.uses()) {
+            try {
+                linkState.addUses(loadClass(used));
+            } catch (ClassNotFoundException ignored) {
+            }
+        }
+        return doLocked(ModuleClassLoader::linkServicesLocked);
+    }
+
+    private LinkState.Services linkServicesLocked() {
+        // double-check it inside the lock
+        LinkState.Linked linkState = linkFull();
+        if (linkState instanceof LinkState.Services srv) {
+            return srv;
+        }
+        log.debugf("Linking module %s to fully linked + services state", moduleName);
+        LinkState.Services srv = new LinkState.Services(
+            linkState
+        );
+        linkState = srv;
+        return srv;
     }
 
     // Private

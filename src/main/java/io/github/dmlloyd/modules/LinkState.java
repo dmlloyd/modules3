@@ -214,4 +214,14 @@ abstract class LinkState {
             return pd;
         }
     }
+
+    static class Services extends Linked {
+        Services(Linked other) {
+            super(other);
+        }
+
+        Services(Services other) {
+            this((Linked)other);
+        }
+    }
 }
