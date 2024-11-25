@@ -30,14 +30,6 @@ public final class Launcher implements Runnable {
     }
 
     public void run() {
-        // force logging initialization
-        ServiceLoader<LogManager> logManagerLoader = ServiceLoader.load(LogManager.class);
-        Iterator<LogManager> iterator = logManagerLoader.iterator();
-        while (true) try {
-            if (! iterator.hasNext()) break;
-            iterator.next();
-        } catch (ServiceConfigurationError ignored) {
-        }
         ModuleFinder finder = ModuleFinder.fromFileSystem(configuration.modulePath());
         ModuleLoader loader = new DelegatingModuleLoader("app", finder, ModuleLoader.forLayer("boot", getClass().getModule().getLayer()));
         String launchName = configuration.launchName();
@@ -151,6 +143,14 @@ public final class Launcher implements Runnable {
      * @return the exit code (0 for success, and any other value for failure)
      */
     public static int main(List<String> args) {
+        // force logging initialization
+        ServiceLoader<LogManager> logManagerLoader = ServiceLoader.load(LogManager.class);
+        Iterator<LogManager> lmIter = logManagerLoader.iterator();
+        while (true) try {
+            if (! lmIter.hasNext()) break;
+            lmIter.next();
+        } catch (ServiceConfigurationError ignored) {
+        }
         args = List.copyOf(args);
         Iterator<String> iterator = args.iterator();
         List<Path> modulePath = List.of(Path.of("."));
