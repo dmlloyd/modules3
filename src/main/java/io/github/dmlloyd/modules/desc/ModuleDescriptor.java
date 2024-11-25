@@ -338,10 +338,21 @@ public record ModuleDescriptor(
 
     private static Dependency parseDependencyElement(final XMLStreamReader xml) throws XMLStreamException {
         String name = null;
+        Modifiers<Dependency.Modifier> modifiers = Modifiers.of();
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
             switch (xml.getAttributeLocalName(i)) {
                 case "name" -> name = xml.getAttributeValue(i);
+                case "transitive" -> {
+                    if (Boolean.parseBoolean(xml.getAttributeValue(i))) {
+                        modifiers = modifiers.with(Dependency.Modifier.TRANSITIVE);
+                    }
+                }
+                case "optional" -> {
+                    if (Boolean.parseBoolean(xml.getAttributeValue(i))) {
+                        modifiers = modifiers.with(Dependency.Modifier.OPTIONAL);
+                    }
+                }
                 default -> throw unknownAttribute(xml, i);
             }
         }
@@ -352,7 +363,7 @@ public record ModuleDescriptor(
             switch (xml.nextTag()) {
                 case XMLStreamConstants.START_ELEMENT -> throw unknownElement(xml);
                 case XMLStreamConstants.END_ELEMENT -> {
-                    return new Dependency(name);
+                    return new Dependency(name, modifiers, Optional.of());
                 }
             }
         }

@@ -78,6 +78,7 @@ public interface ModuleFinder extends Closeable {
                                     // uncommon
                                     ArrayList<Path> newList = new ArrayList<>(8);
                                     newList.addAll(items);
+                                    newList.add(subPath);
                                     items = newList;
                                 } else {
                                     // uncommon
@@ -111,7 +112,8 @@ public interface ModuleFinder extends Closeable {
                                 try (BufferedReader br = Files.newBufferedReader(moduleXml, StandardCharsets.UTF_8)) {
                                     XMLStreamReader xml = XMLInputFactory.newDefaultFactory().createXMLStreamReader(br);
                                     try (XMLCloser ignored = xml::close) {
-                                        return ModuleDescriptor.fromXml(xml);
+                                        return ModuleDescriptor.fromXml(xml)
+                                            .withResourceLoaders(resourceLoaders.stream().map(ResourceLoaderOpener::forLoader).toList());
                                     }
                                 } catch (XMLStreamException | IOException e) {
                                     throw new ModuleLoadException("Failed to read " + moduleXml, e);
