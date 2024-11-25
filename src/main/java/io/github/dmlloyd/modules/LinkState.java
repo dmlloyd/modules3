@@ -149,13 +149,25 @@ abstract class LinkState {
 
         void addExports(final String pn, final Module target) {
             if (layerController != null) {
-                layerController.addExports(module, pn, target);
+                try {
+                    layerController.addExports(module, pn, target);
+                } catch (IllegalArgumentException e) {
+                    IllegalArgumentException e2 = new IllegalArgumentException("Failed to export " + module + " to " + target + ": " + e.getMessage());
+                    e2.setStackTrace(e.getStackTrace());
+                    throw e2;
+                }
             }
         }
 
         void addOpens(final String pn, final Module target) {
             if (layerController != null) {
-                layerController.addOpens(module, pn, target);
+                try {
+                    layerController.addOpens(module, pn, target);
+                } catch (IllegalArgumentException e) {
+                    IllegalArgumentException e2 = new IllegalArgumentException("Failed to open " + module + " to " + target + ": " + e.getMessage());
+                    e2.setStackTrace(e.getStackTrace());
+                    throw e2;
+                }
             }
         }
 

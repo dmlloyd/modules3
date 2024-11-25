@@ -1,5 +1,6 @@
 package io.github.dmlloyd.modules.desc;
 
+import java.lang.constant.ClassDesc;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -146,7 +147,11 @@ public record ModuleDescriptor(
             ma.moduleVersion().map(Utf8Entry::stringValue),
             Optional.empty(),
             mods,
-            mca.map(ModuleMainClassAttribute::mainClass).map(ClassEntry::name).map(Utf8Entry::stringValue).map(s -> s.replace('/', '.')),
+            mca.map(ModuleMainClassAttribute::mainClass)
+                .map(ClassEntry::name)
+                .map(Utf8Entry::stringValue)
+                .map(s -> s.replace('/', '.'))
+                .map(String::intern),
             Optional.empty(),
             ModuleClassLoader::new,
             ma.requires().stream().map(
@@ -163,6 +168,7 @@ public record ModuleDescriptor(
                     opt(e.exportsTo().stream()
                         .map(ModuleEntry::name)
                         .map(Utf8Entry::stringValue)
+                        .map(String::intern)
                         .collect(Collectors.toUnmodifiableSet())
                     )
                 )
@@ -174,16 +180,26 @@ public record ModuleDescriptor(
                     opt(o.opensTo().stream()
                         .map(ModuleEntry::name)
                         .map(Utf8Entry::stringValue)
+                        .map(s -> s.replace('/', '.'))
+                        .map(String::intern)
                         .collect(Collectors.toUnmodifiableSet())
                     )
                 )
             ).collect(Collectors.toUnmodifiableSet()),
-            ma.uses().stream().map(ClassEntry::name).map(Utf8Entry::stringValue).collect(Collectors.toUnmodifiableSet()),
+            ma.uses().stream()
+                .map(ClassEntry::name)
+                .map(Utf8Entry::stringValue)
+                .map(s -> s.replace('/', '.'))
+                .map(String::intern)
+                .collect(Collectors.toUnmodifiableSet()
+            ),
             ma.provides().stream().map(
-                mpi -> Map.entry(mpi.provides().name().stringValue(),
+                mpi -> Map.entry(mpi.provides().name().stringValue().replace('/', '.').intern(),
                     mpi.providesWith().stream()
                         .map(ClassEntry::name)
                         .map(Utf8Entry::stringValue)
+                        .map(s -> s.replace('/', '.'))
+                        .map(String::intern)
                         .toList())
             ).collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue)),
             List.of(),
@@ -265,6 +281,7 @@ public record ModuleDescriptor(
                         }
                         case "uses" -> uses = parseUsesElement(xml);
                         case "provides" -> provides = parseProvidesElement(xml);
+                        case "main-class" -> mainClass = Optional.of(parseMainClassElement(xml));
                         default -> throw unknownElement(xml);
                     }
                 }
@@ -389,6 +406,9 @@ public record ModuleDescriptor(
         } else if (openTargets.isPresent()) {
             opens.add(new Open(name, Modifiers.of(), openTargets));
         }
+        if (xml.nextTag() != XMLStreamConstants.END_ELEMENT) {
+            throw unknownElement(xml);
+        }
     }
 
     private static Set<String> parseUsesElement(final XMLStreamReader xml) throws XMLStreamException {
@@ -478,6 +498,25 @@ public record ModuleDescriptor(
     }
 
     private static String parseWithElement(final XMLStreamReader xml) throws XMLStreamException {
+        String name = null;
+        int cnt = xml.getAttributeCount();
+        for (int i = 0; i < cnt; i ++) {
+            final String attrVal = xml.getAttributeValue(i);
+            switch (xml.getAttributeLocalName(i)) {
+                case "name" -> name = attrVal;
+                default -> throw unknownAttribute(xml, i);
+            }
+        }
+        if (name == null) {
+            throw missingAttribute(xml, "name");
+        }
+        if (xml.nextTag() == XMLStreamConstants.START_ELEMENT) {
+            throw unknownElement(xml);
+        }
+        return name;
+    }
+
+    private static String parseMainClassElement(final XMLStreamReader xml) throws XMLStreamException {
         String name = null;
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {

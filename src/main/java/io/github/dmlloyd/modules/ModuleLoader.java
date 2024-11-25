@@ -63,6 +63,14 @@ public class ModuleLoader implements Closeable {
         }
     }
 
+    public final LoadedModule requireModule(final String moduleName) {
+        LoadedModule loadedModule = loadModule(moduleName);
+        if (loadedModule == null) {
+            throw new ModuleNotFoundException(moduleName);
+        }
+        return loadedModule;
+    }
+
     public void close() throws IOException {
         List<ModuleClassLoader> loaders;
         defineLock.lock();
@@ -187,7 +195,8 @@ public class ModuleLoader implements Closeable {
                     desc.modifiers(),
                     desc.uses(),
                     desc.provides(),
-                    desc.location().orElse(null)
+                    desc.location().orElse(null),
+                    desc.mainClass().orElse(null)
                 ));
                 if (loader == null) {
                     throw new NullPointerException("Class loader factory " + desc.classLoaderFactory() + " returned null for apply()");

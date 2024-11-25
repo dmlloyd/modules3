@@ -20,6 +20,9 @@ public record Open(
 ) {
     public Open {
         Assert.checkNotNullParam("packageName", packageName);
+        if (packageName.contains("/")) {
+            throw new IllegalArgumentException("Invalid package name: " + packageName);
+        }
         Assert.checkNotNullParam("modifiers", modifiers);
         targets = Assert.checkNotNullParam("targets", targets).map(Set::copyOf);
     }

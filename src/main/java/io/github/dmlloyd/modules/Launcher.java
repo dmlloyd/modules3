@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.lang.module.ModuleDescriptor;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -61,7 +62,16 @@ public final class Launcher implements Runnable {
                 }
                 bootModule = loaded.module();
                 if (idx == -1) {
-                    mainClassName = bootModule.getDescriptor().mainClass().orElseThrow(IllegalArgumentException::new);
+                    if (loaded.classLoader() instanceof ModuleClassLoader mcl) {
+                        mainClassName = mcl.mainClassName();
+                    } else {
+                        ModuleDescriptor descriptor = bootModule.getDescriptor();
+                        if (descriptor != null) {
+                            mainClassName = descriptor.mainClass().orElseThrow(IllegalArgumentException::new);
+                        } else {
+                            mainClassName = null;
+                        }
+                    }
                 } else {
                     mainClassName = launchName.substring(idx + 1);
                 }
@@ -74,6 +84,9 @@ public final class Launcher implements Runnable {
                 
                 """);
             return;
+        }
+        if (mainClassName == null) {
+            throw new IllegalArgumentException("No main class found on boot module \"" + bootModule + "\"");
         }
         // programs which depend on TCCL are wrong; however, no reason to cause trouble over it
         ClassLoader oldCl = Thread.currentThread().getContextClassLoader();

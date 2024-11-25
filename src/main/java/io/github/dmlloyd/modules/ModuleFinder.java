@@ -12,7 +12,9 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
@@ -21,6 +23,7 @@ import javax.xml.stream.XMLStreamReader;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.resource.JarFileResourceLoader;
+import io.smallrye.common.resource.PathResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
 
@@ -95,8 +98,10 @@ public interface ModuleFinder extends Closeable {
                         List<ResourceLoader> resourceLoaders = new ArrayList<>(items.size());
                         try {
                             for (Path item : items) {
+                                // todo - temp workaround for https://github.com/smallrye/smallrye-common/pull/378
+                                PathResource pr = new PathResource(item.toString(), item);
                                 try {
-                                    resourceLoaders.add(new JarFileResourceLoader(item));
+                                    resourceLoaders.add(new JarFileResourceLoader(pr));
                                 } catch (IOException e) {
                                     throw new ModuleLoadException("Failed to open JAR file", e);
                                 }
@@ -109,7 +114,7 @@ public interface ModuleFinder extends Closeable {
                                         return ModuleDescriptor.fromXml(xml);
                                     }
                                 } catch (XMLStreamException | IOException e) {
-                                    throw new ModuleLoadException("Failed to read module.xml file", e);
+                                    throw new ModuleLoadException("Failed to read " + moduleXml, e);
                                 }
                             }
                             for (ResourceLoader resourceLoader : resourceLoaders) {
@@ -121,9 +126,8 @@ public interface ModuleFinder extends Closeable {
                                         try (InputStream is = resource.openStream()) {
                                             bytes = is.readAllBytes();
                                         }
-                                        return ModuleDescriptor.fromModuleInfo(bytes, () -> {
-                                            throw new UnsupportedOperationException("todo");
-                                        }).withResourceLoaders(resourceLoaders.stream().map(ResourceLoaderOpener::forLoader).toList());
+                                        return ModuleDescriptor.fromModuleInfo(bytes, () -> defaultPackageFinder(resourceLoaders))
+                                            .withResourceLoaders(resourceLoaders.stream().map(ResourceLoaderOpener::forLoader).toList());
                                     }
                                 } catch (NoSuchFileException | FileNotFoundException ignored) {
                                     // just try the next one
@@ -148,6 +152,37 @@ public interface ModuleFinder extends Closeable {
                 return null;
             }
         };
+    }
+
+
+    private static Set<String> defaultPackageFinder(final List<ResourceLoader> resourceLoaders) {
+        return defaultPackageFinder(resourceLoaders, new HashSet<>());
+    }
+
+    private static Set<String> defaultPackageFinder(List<ResourceLoader> resourceLoaders, HashSet<String> packages) {
+        for (ResourceLoader resourceLoader : resourceLoaders) {
+            try {
+                defaultPackageFinder(resourceLoader.findResource("/"), packages);
+            } catch (IOException e) {
+                throw new ModuleLoadException("Failed to compute package list from " + resourceLoader, e);
+            }
+        }
+        return packages;
+    }
+
+    private static void defaultPackageFinder(Resource directory, HashSet<String> packages) throws IOException {
+        try (DirectoryStream<Resource> ds = directory.openDirectoryStream()) {
+            for (Resource resource : ds) {
+                if (resource.isDirectory()) {
+                    defaultPackageFinder(resource, packages);
+                } else if (resource.pathName().endsWith(".class")) {
+                    int idx = resource.pathName().lastIndexOf('/');
+                    if (idx != -1) {
+                        packages.add(resource.pathName().substring(0, idx).replace('/', '.'));
+                    }
+                }
+            }
+        }
     }
 
     interface XMLCloser extends AutoCloseable {

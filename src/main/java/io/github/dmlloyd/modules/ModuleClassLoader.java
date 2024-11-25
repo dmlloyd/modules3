@@ -73,6 +73,7 @@ public class ModuleClassLoader extends ClassLoader {
     private final String moduleName;
     private final String moduleVersion;
     private final ModuleLoader moduleLoader;
+    private final String mainClassName;
 
     /**
      * The lock used for certain linking operations.
@@ -97,6 +98,7 @@ public class ModuleClassLoader extends ClassLoader {
         this.moduleLoader = config.moduleLoader();
         this.moduleName = config.moduleName();
         this.moduleVersion = config.moduleVersion();
+        this.mainClassName = config.mainClassName();
         this.linkState = new LinkState.Initial(
             config.dependencies(),
             config.resourceLoaders(),
@@ -252,6 +254,10 @@ public class ModuleClassLoader extends ClassLoader {
      */
     public static ModuleClassLoader forModule(Module module) {
         return module.getClassLoader() instanceof ModuleClassLoader mcl ? mcl : null;
+    }
+
+    public String toString() {
+        return "ModuleClassLoader[" + moduleName + "]";
     }
 
     // private
@@ -544,7 +550,17 @@ public class ModuleClassLoader extends ClassLoader {
         if (linkState instanceof LinkState.Dependencies deps) {
             return deps;
         }
-        List<LoadedModule> loadedDependencies = linkState.dependencies().stream().map(d -> d.moduleLoader().orElse(moduleLoader).loadModule(d.moduleName())).toList();
+        List<LoadedModule> loadedDependencies = linkState.dependencies().stream()
+            .map(d -> {
+                ModuleLoader ml = d.moduleLoader().orElse(moduleLoader);
+                if (d.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
+                    return ml.loadModule(moduleName);
+                } else {
+                    return ml.requireModule(moduleName);
+                }
+            })
+            .filter(Objects::nonNull)
+            .toList();
         return doLocked(ModuleClassLoader::linkDependenciesLocked, loadedDependencies);
     }
 
@@ -576,10 +592,14 @@ public class ModuleClassLoader extends ClassLoader {
         }
         java.lang.module.ModuleDescriptor descriptor;
         Resource moduleInfo = loadModuleInfo();
-        try (InputStream is = moduleInfo.openStream()) {
-            descriptor = java.lang.module.ModuleDescriptor.read(is);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        if (moduleInfo != null) {
+            try (InputStream is = moduleInfo.openStream()) {
+                descriptor = java.lang.module.ModuleDescriptor.read(is);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            descriptor = null;
         }
         return doLocked(ModuleClassLoader::linkDefinedLocked, descriptor);
     }
@@ -632,23 +652,32 @@ public class ModuleClassLoader extends ClassLoader {
             return linked;
         }
         List<Dependency> dependencies = linkState.dependencies();
-        List<Module> loaders = new ArrayList<>(dependencies.size());
+        List<LoadedModule> loaders = new ArrayList<>(dependencies.size());
         for (Dependency dependency : dependencies) {
             String depName = dependency.moduleName();
             LoadedModule resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
             if (resolved != null) {
                 // link to it
                 linkState.addReads(resolved.module());
-                loaders.add(resolved.module());
+                loaders.add(resolved);
             } else if (! dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
                 throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
             }
         }
         // the actual map to build
         HashMap<String, Module> modulesByPackage = new HashMap<>();
-        for (Module module : loaders) {
+        for (LoadedModule lm : loaders) {
+            Module module = lm.module();
             // skip java.base for memory efficiency (everyone reads it)
             if (module != javaBase) {
+                if (lm.classLoader() instanceof ModuleClassLoader mcl) {
+                    Set<String> packages = mcl.linkInitial().packages();
+                    for (String pkg : packages) {
+                        if (mcl.exportedPackages().contains(pkg) || module.isExported(pkg, linkState.module())) {
+                            modulesByPackage.putIfAbsent(pkg, module);
+                        }
+                    }
+                }
                 Set<String> packages = module.getPackages();
                 for (String pkg : packages) {
                     if (module.isExported(pkg, linkState.module())) {
@@ -713,6 +742,10 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private Resource loadModuleInfo() {
+        if (linkInitial().modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
+            // no module-info for unnamed modules
+            return null;
+        }
         // todo: copy annotations
         byte[] bytes = ClassFile.of().build(ConstantUtils.CD_module_info, zb -> {
             zb.withVersion(ClassFile.JAVA_9_VERSION, 0);
@@ -935,6 +968,10 @@ public class ModuleClassLoader extends ClassLoader {
         return controller;
     }
 
+    String mainClassName() {
+        return mainClassName;
+    }
+
     public static final class ClassLoaderConfiguration {
         private final ModuleLoader moduleLoader;
         private final String classLoaderName;
@@ -949,6 +986,7 @@ public class ModuleClassLoader extends ClassLoader {
         private final Set<String> uses;
         private final Map<String, List<String>> provides;
         private final URI location;
+        private final String mainClassName;
 
         ClassLoaderConfiguration(
             ModuleLoader moduleLoader,
@@ -963,7 +1001,8 @@ public class ModuleClassLoader extends ClassLoader {
             Modifiers<ModuleDescriptor.Modifier> modifiers,
             Set<String> uses,
             Map<String, List<String>> provides,
-            URI location
+            URI location,
+            String mainClassName
         ) {
             this.moduleLoader = moduleLoader;
             this.classLoaderName = classLoaderName;
@@ -978,6 +1017,7 @@ public class ModuleClassLoader extends ClassLoader {
             this.uses = uses;
             this.provides = provides;
             this.location = location;
+            this.mainClassName = mainClassName;
         }
 
         ModuleLoader moduleLoader() {
@@ -1030,6 +1070,10 @@ public class ModuleClassLoader extends ClassLoader {
 
         URI location() {
             return location;
+        }
+
+        String mainClassName() {
+            return mainClassName;
         }
     }
 
