@@ -34,7 +34,7 @@ public final class BasicTests {
                     List.of(
                         new Dependency(
                             "java.base",
-                            Modifiers.of(Dependency.Modifier.MANDATORY, Dependency.Modifier.SYNTHETIC),
+                            Modifiers.of(Dependency.Modifier.MANDATED, Dependency.Modifier.SYNTHETIC),
                             Optional.empty()
                         )
                     ),

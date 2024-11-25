@@ -1,6 +1,5 @@
 package io.github.dmlloyd.modules.desc;
 
-import java.lang.constant.ClassDesc;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -157,7 +156,7 @@ public record ModuleDescriptor(
             ma.requires().stream().map(
                 r -> new Dependency(
                     r.requires().name().stringValue(),
-                    Modifiers.of(),
+                    toModifiers(r.requiresFlags()),
                     Optional.empty()
                 )
             ).toList(),
@@ -175,12 +174,11 @@ public record ModuleDescriptor(
             ).collect(Collectors.toUnmodifiableSet()),
             ma.opens().stream().map(
                 o -> new Open(
-                    o.openedPackage().name().stringValue(),
+                    o.openedPackage().name().stringValue().replace('/', '.'),
                     Modifiers.of(),
                     opt(o.opensTo().stream()
                         .map(ModuleEntry::name)
                         .map(Utf8Entry::stringValue)
-                        .map(s -> s.replace('/', '.'))
                         .map(String::intern)
                         .collect(Collectors.toUnmodifiableSet())
                     )
@@ -211,6 +209,19 @@ public record ModuleDescriptor(
                 .collect(Collectors.toUnmodifiableSet())
             ).orElseGet(packageFinder)
         );
+    }
+
+    private static Modifiers<Dependency.Modifier> toModifiers(final Set<AccessFlag> accessFlags) {
+        Modifiers<Dependency.Modifier> mods = Modifiers.of();
+        for (AccessFlag accessFlag : accessFlags) {
+            switch (accessFlag) {
+                case STATIC_PHASE -> mods = mods.with(Dependency.Modifier.OPTIONAL);
+                case SYNTHETIC -> mods = mods.with(Dependency.Modifier.SYNTHETIC);
+                case MANDATED -> mods = mods.with(Dependency.Modifier.MANDATED);
+                case TRANSITIVE -> mods = mods.with(Dependency.Modifier.TRANSITIVE);
+            }
+        }
+        return mods;
     }
 
     public static ModuleDescriptor fromXml(XMLStreamReader xml) throws XMLStreamException {

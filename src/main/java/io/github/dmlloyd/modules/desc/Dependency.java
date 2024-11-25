@@ -39,7 +39,7 @@ public record Dependency(
      */
     public enum Modifier implements ModifierFlag {
         SYNTHETIC,
-        MANDATORY,
+        MANDATED,
         OPTIONAL,
         TRANSITIVE,
         ;

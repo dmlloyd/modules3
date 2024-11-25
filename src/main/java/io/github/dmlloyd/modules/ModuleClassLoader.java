@@ -716,6 +716,9 @@ public class ModuleClassLoader extends ClassLoader {
         return doLocked(this_ -> this_.linkFullLocked(modulesByPackage));
     }
 
+    // todo: add next link state: services (uses added)
+    // todo: provides cannot be dynamically added...
+
     private LinkState.Linked linkFullLocked(final Map<String, Module> modulesByPackage) {
         // double-check it inside the lock
         LinkState.Defined defined = linkDefined();
@@ -768,40 +771,6 @@ public class ModuleClassLoader extends ClassLoader {
                         .stream()
                         .filter(o -> o.targets().isEmpty())
                         .forEach(o -> mab.opens(PackageDesc.of(o.packageName()), List.of()));
-                    // uses
-                    linkInitial().uses().forEach(clz -> mab.uses(ClassDesc.of(clz)));
-                    // provides
-                    linkInitial().provides().forEach((svc, impls) -> mab.provides(
-                        ClassDesc.of(svc),
-                        impls.stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
-                    ));
-                    // imported providers
-                    linkDependencies().providedServices().forEach((svc, impls) -> {
-
-                    });
-                    // and imported providers
-                    linkDependencies().loadedDependencies().forEach(lm -> {
-                        if (lm.classLoader() instanceof ModuleClassLoader mcl) {
-                            // get the services from the module
-                            mcl.linkInitial().provides().forEach((svc, impls) -> {
-                                mab.provides(
-                                    ClassDesc.of(svc),
-                                    impls.stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
-                                );
-                            });
-                        } else {
-                            Module module = lm.module();
-                            if (module != javaBase) {
-                                // (todo) check layer parentage
-                                module.getDescriptor().provides().forEach(p -> {
-                                    mab.provides(
-                                        ClassDesc.of(p.service()),
-                                        p.providers().stream().map(ClassDesc::of).toArray(ClassDesc[]::new)
-                                    );
-                                });
-                            }
-                        }
-                    });
                 }
             ));
             zb.with(ModulePackagesAttribute.of(
