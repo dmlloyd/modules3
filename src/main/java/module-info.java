@@ -8,6 +8,7 @@ module io.github.dmlloyd.modules {
     requires io.smallrye.common.constraint;
     requires io.smallrye.common.resource;
     requires java.xml;
+    requires java.logging;
 
     // todo: only do this on packaging
     requires java.se;
@@ -15,4 +16,6 @@ module io.github.dmlloyd.modules {
 
     exports io.github.dmlloyd.modules;
     exports io.github.dmlloyd.modules.desc;
+
+    uses java.util.logging.LogManager;
 }

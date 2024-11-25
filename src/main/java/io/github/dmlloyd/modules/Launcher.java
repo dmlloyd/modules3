@@ -12,6 +12,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.ServiceConfigurationError;
+import java.util.ServiceLoader;
+import java.util.logging.LogManager;
 import java.util.stream.Stream;
 
 import io.smallrye.common.constraint.Assert;
@@ -27,6 +30,14 @@ public final class Launcher implements Runnable {
     }
 
     public void run() {
+        // force logging initialization
+        ServiceLoader<LogManager> logManagerLoader = ServiceLoader.load(LogManager.class);
+        Iterator<LogManager> iterator = logManagerLoader.iterator();
+        while (true) try {
+            if (! iterator.hasNext()) break;
+            iterator.next();
+        } catch (ServiceConfigurationError ignored) {
+        }
         ModuleFinder finder = ModuleFinder.fromFileSystem(configuration.modulePath());
         ModuleLoader loader = new DelegatingModuleLoader("app", finder, ModuleLoader.forLayer("boot", getClass().getModule().getLayer()));
         String launchName = configuration.launchName();
