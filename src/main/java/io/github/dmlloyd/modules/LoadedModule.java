@@ -30,6 +30,14 @@ public abstract class LoadedModule {
      */
     public abstract ClassLoader classLoader() throws ModuleLoadException;
 
+    public boolean equals(final Object obj) {
+        return obj instanceof LoadedModule lm && equals(lm);
+    }
+
+    public abstract boolean equals(LoadedModule other);
+
+    public abstract int hashCode();
+
     /**
      * {@return a loaded module for the given module}
      * @param module the module to encapsulate (must not be {@code null})
@@ -47,6 +55,18 @@ public abstract class LoadedModule {
             public ClassLoader classLoader() throws ModuleLoadException {
                 return module.getClassLoader();
             }
+
+            public boolean equals(final LoadedModule other) {
+                return other != null && other.getClass() == getClass() && module.equals(other.module());
+            }
+
+            public int hashCode() {
+                return module.hashCode();
+            }
+
+            public String toString() {
+                return "Loaded[" + module() + "]";
+            }
         };
     }
 
@@ -63,6 +83,18 @@ public abstract class LoadedModule {
 
             public ModuleClassLoader classLoader() {
                 return cl;
+            }
+
+            public boolean equals(final LoadedModule other) {
+                return other != null && other.getClass() == getClass() && cl.equals(other.classLoader());
+            }
+
+            public int hashCode() {
+                return cl.hashCode();
+            }
+
+            public String toString() {
+                return "Loaded[" + classLoader() + "]";
             }
         };
     }

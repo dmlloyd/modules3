@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -401,7 +402,7 @@ public class ModuleClassLoader extends ClassLoader {
         // TODO: canonicalize
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
-            return List.of(loadModuleInfo());
+            return Optional.ofNullable(loadModuleInfo()).map(List::of).orElse(List.of());
         }
         if (name.startsWith("META-INF/services/") && name.lastIndexOf('/') == 17) {
             return Optional.ofNullable(loadServicesFileDirect(name)).map(List::of).orElse(List.of());
@@ -650,6 +651,53 @@ public class ModuleClassLoader extends ClassLoader {
         return defined;
     }
 
+    private void resolveDependencies(ModuleLoader nextLoader, LinkState.Defined linkState, java.lang.module.ModuleDescriptor.Requires require, List<LoadedModule> loaders, Set<LoadedModule> visited) {
+        String depName = require.name();
+        LoadedModule resolved = nextLoader.loadModule(depName);
+        if (resolved != null) {
+            // link to it
+            linkDependency(linkState, require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.TRANSITIVE), loaders, resolved, visited);
+        } else if (! require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC)) {
+            throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
+        }
+    }
+
+    private void resolveDependencies(LinkState.Defined linkState, Dependency dependency, List<LoadedModule> loaders, Set<LoadedModule> visited) {
+        String depName = dependency.moduleName();
+        LoadedModule resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
+        if (resolved != null) {
+            // link to it
+            linkDependency(linkState, dependency.modifiers().contains(Dependency.Modifier.TRANSITIVE), loaders, resolved, visited);
+        } else if (! dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
+            throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
+        }
+    }
+
+    private void linkDependency(LinkState.Defined linkState, boolean transitive, List<LoadedModule> loaders, LoadedModule resolved, Set<LoadedModule> visited) {
+        if (visited.add(resolved)) {
+            linkState.addReads(resolved.module());
+            loaders.add(resolved);
+            if (transitive) {
+                // also find the dependencies of the dependency
+                if (resolved.classLoader() instanceof ModuleClassLoader mcl) {
+                    for (Dependency depDep : mcl.linkInitial().dependencies()) {
+                        resolveDependencies(linkState, depDep, loaders, visited);
+                    }
+                } else {
+                    Module module = resolved.module();
+                    if (module.isNamed()) {
+                        java.lang.module.ModuleDescriptor desc = module.getDescriptor();
+                        if (desc != null) {
+                            for (java.lang.module.ModuleDescriptor.Requires require : desc.requires()) {
+                                resolveDependencies(ModuleLoader.forLayer("temp loader", module.getLayer()), linkState, require, loaders, visited);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private LinkState.Linked linkFull() {
         LinkState.Defined linkState = linkDefined();
         if (linkState instanceof LinkState.Linked linked) {
@@ -657,16 +705,9 @@ public class ModuleClassLoader extends ClassLoader {
         }
         List<Dependency> dependencies = linkState.dependencies();
         List<LoadedModule> loaders = new ArrayList<>(dependencies.size());
+        HashSet<LoadedModule> visited = new HashSet<>();
         for (Dependency dependency : dependencies) {
-            String depName = dependency.moduleName();
-            LoadedModule resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
-            if (resolved != null) {
-                // link to it
-                linkState.addReads(resolved.module());
-                loaders.add(resolved);
-            } else if (! dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
-                throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
-            }
+            resolveDependencies(linkState, dependency, loaders, visited);
         }
         // the actual map to build
         HashMap<String, Module> modulesByPackage = new HashMap<>();
