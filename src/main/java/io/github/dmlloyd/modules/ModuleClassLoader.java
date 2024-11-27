@@ -20,7 +20,6 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.ProtectionDomain;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -69,7 +68,9 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
-    private static final Module javaBase = Object.class.getModule();
+    private static final Map<String, Module> bootModuleIndex = ModuleLayer.boot().modules().stream()
+        .flatMap(m -> m.getPackages().stream().filter(m::isExported).map(p -> Map.entry(p, m)))
+        .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
 
     private final String moduleName;
     private final String moduleVersion;
@@ -149,13 +150,13 @@ public class ModuleClassLoader extends ClassLoader {
         if (packageName.isEmpty() || packageName.equals("$internal")) {
             return loadClassDirect(name);
         }
-        if (javaBase.getPackages().contains(packageName)) {
+        if (bootModuleIndex.containsKey(packageName)) {
             if (dotName.equals("java.util.ServiceLoader")) {
                 // loading services! extra linking required
                 linkServices();
             }
             // -> BootLoader.loadClass(...)
-            return Class.forName(javaBase, name);
+            return Class.forName(bootModuleIndex.get(packageName), name);
         }
         Module module = linkFull().modulesByPackage().get(packageName);
         if (module == null) {
@@ -722,7 +723,7 @@ public class ModuleClassLoader extends ClassLoader {
             Module module = lm.module();
             linkState.addReads(module);
             // skip java.base for memory efficiency (everyone reads it)
-            if (module != javaBase) {
+            if (! ModuleLayer.boot().modules().contains(module)) {
                 linkExportedPackages(linkState, lm, modulesByPackage, visited);
             }
         }
