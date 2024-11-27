@@ -1,5 +1,10 @@
 package io.github.dmlloyd.modules;
 
+import static java.lang.invoke.MethodHandles.lookup;
+import static java.lang.invoke.MethodHandles.privateLookupIn;
+
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodType;
 import java.net.URI;
 import java.security.CodeSigner;
 import java.security.CodeSource;
@@ -120,6 +125,7 @@ abstract class LinkState {
         private final Module module;
         private final ModuleLayer.Controller layerController;
         private final Set<String> exportedPackages;
+        private final MethodHandle addUses;
 
         Defined(
             final Dependencies other,
@@ -131,6 +137,13 @@ abstract class LinkState {
             this.module = module;
             this.layerController = layerController;
             this.exportedPackages = exportedPackages;
+            getClass().getModule().addReads(module);
+            try {
+                Class<?> utils = ((ModuleClassLoader)module.getClassLoader()).loadClassDirect("$internal.Utils");
+                addUses = privateLookupIn(utils, lookup()).findStatic(utils, "use", MethodType.methodType(void.class, Class.class));
+            } catch (ClassNotFoundException | IllegalAccessException | NoSuchMethodException e) {
+                throw new IllegalStateException("Cannot open internal package of " + module.getName(), e);
+            }
         }
 
         Defined(final Defined other) {
@@ -173,9 +186,9 @@ abstract class LinkState {
 
         void addUses(final Class<?> service) {
             try {
-                module.getClassLoader().loadClass("$internal.Utils").getDeclaredMethod("use", Class.class).invoke(null, service);
-            } catch (Exception e) {
-                throw new IllegalStateException("Unexpected failure", e);
+                addUses.invokeExact(service);
+            } catch (Throwable t) {
+                throw new IllegalStateException("Unexpected failure", t);
             }
         }
 

@@ -19,9 +19,13 @@ final class JarFileModuleFinder implements ModuleFinder {
     private final ResourceLoader jarLoader;
     private final ModuleDescriptor descriptor;
 
-    JarFileModuleFinder(final ResourceLoader jarLoader) {
+    JarFileModuleFinder(final ResourceLoader jarLoader, final String name) {
         this.jarLoader = jarLoader;
-        descriptor = computeModuleDesc(jarLoader).withResourceLoaders(List.of(ResourceLoaderOpener.forLoader(jarLoader)));
+        descriptor = computeModuleDesc(jarLoader).withResourceLoaders(List.of(ResourceLoaderOpener.forLoader(jarLoader))).withName(name);
+    }
+
+    JarFileModuleFinder(final Path jarPath) throws IOException {
+        this(new JarFileResourceLoader(jarPath), jarPath.getFileName().toString());
     }
 
     static ModuleDescriptor computeModuleDesc(ResourceLoader loader) {
@@ -48,10 +52,6 @@ final class JarFileModuleFinder implements ModuleFinder {
         } catch (IOException ignored) {}
         // fall back to a basic config
         throw new UnsupportedOperationException("Not supported yet");
-    }
-
-    JarFileModuleFinder(final Path jarPath) throws IOException {
-        this(new JarFileResourceLoader(jarPath));
     }
 
     public ModuleDescriptor findModule(final String name) {

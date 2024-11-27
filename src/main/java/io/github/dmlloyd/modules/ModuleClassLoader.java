@@ -340,7 +340,6 @@ public class ModuleClassLoader extends ClassLoader {
             return loaded;
         }
         String packageName = Util.packageName(dotName);
-        LinkState.Linked linked = linkFull();
         if (packageName.equals("$internal")) {
             return switch (dotName) {
                 case "$internal.Utils" -> {
@@ -362,8 +361,9 @@ public class ModuleClassLoader extends ClassLoader {
                 default -> throw new ClassNotFoundException("Invalid internal class");
             };
         }
+        LinkState.Linked linked = linkFull();
         if (! packageName.isEmpty() && ! linked.packages().contains(packageName)) {
-            throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from this loader");
+            throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from " + moduleName);
         }
 
         String fullPath = name.replace('.', '/') + ".class";
@@ -377,7 +377,7 @@ public class ModuleClassLoader extends ClassLoader {
         } catch (IOException e) {
             throw new ClassNotFoundException("Failed to load " + dotName, e);
         }
-        throw new ClassNotFoundException("Class `" + name + "` is not found in this loader");
+        throw new ClassNotFoundException("Class `" + name + "` is not found in " + moduleName);
     }
 
     final Resource loadResourceDirect(final String name) throws IOException {
@@ -421,7 +421,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private Resource loadServicesFileDirect(final String name) {
-        List<String> services = linkDependencies().providedServices().getOrDefault(name.substring(17), List.of());
+        List<String> services = linkDependencies().providedServices().getOrDefault(name.substring(18), List.of());
         if (services.isEmpty()) {
             return null;
         }
@@ -559,9 +559,9 @@ public class ModuleClassLoader extends ClassLoader {
             .map(d -> {
                 ModuleLoader ml = d.moduleLoader().orElse(moduleLoader);
                 if (d.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
-                    return ml.loadModule(moduleName);
+                    return ml.loadModule(d.moduleName());
                 } else {
-                    return ml.requireModule(moduleName);
+                    return ml.requireModule(d.moduleName());
                 }
             })
             .filter(Objects::nonNull)
@@ -651,46 +651,50 @@ public class ModuleClassLoader extends ClassLoader {
         return defined;
     }
 
-    private void resolveDependencies(ModuleLoader nextLoader, LinkState.Defined linkState, java.lang.module.ModuleDescriptor.Requires require, List<LoadedModule> loaders, Set<LoadedModule> visited) {
-        String depName = require.name();
-        LoadedModule resolved = nextLoader.loadModule(depName);
-        if (resolved != null) {
-            // link to it
-            linkDependency(linkState, require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.TRANSITIVE), loaders, resolved, visited);
-        } else if (! require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC)) {
-            throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
-        }
-    }
-
-    private void resolveDependencies(LinkState.Defined linkState, Dependency dependency, List<LoadedModule> loaders, Set<LoadedModule> visited) {
-        String depName = dependency.moduleName();
-        LoadedModule resolved = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
-        if (resolved != null) {
-            // link to it
-            linkDependency(linkState, dependency.modifiers().contains(Dependency.Modifier.TRANSITIVE), loaders, resolved, visited);
-        } else if (! dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
-            throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
-        }
-    }
-
-    private void linkDependency(LinkState.Defined linkState, boolean transitive, List<LoadedModule> loaders, LoadedModule resolved, Set<LoadedModule> visited) {
-        if (visited.add(resolved)) {
-            linkState.addReads(resolved.module());
-            loaders.add(resolved);
-            if (transitive) {
-                // also find the dependencies of the dependency
-                if (resolved.classLoader() instanceof ModuleClassLoader mcl) {
-                    for (Dependency depDep : mcl.linkInitial().dependencies()) {
-                        resolveDependencies(linkState, depDep, loaders, visited);
+    private void linkExportedPackages(LinkState.Defined linkState, LoadedModule loaded, Map<String, Module> modulesByPackage, Set<LoadedModule> visited) {
+        if (visited.add(loaded)) {
+            linkState.addReads(loaded.module());
+            if (loaded.classLoader() instanceof ModuleClassLoader mcl) {
+                Set<String> packages = mcl.linkInitial().packages();
+                for (String pkg : packages) {
+                    if (mcl.module().isExported(pkg, linkState.module())) {
+                        modulesByPackage.putIfAbsent(pkg, mcl.module());
                     }
-                } else {
-                    Module module = resolved.module();
-                    if (module.isNamed()) {
-                        java.lang.module.ModuleDescriptor desc = module.getDescriptor();
-                        if (desc != null) {
-                            for (java.lang.module.ModuleDescriptor.Requires require : desc.requires()) {
-                                resolveDependencies(ModuleLoader.forLayer("temp loader", module.getLayer()), linkState, require, loaders, visited);
+                }
+                for (Dependency dependency : mcl.linkInitial().dependencies()) {
+                    if (dependency.modifiers().contains(Dependency.Modifier.TRANSITIVE)) {
+                        LoadedModule dep = dependency.moduleLoader().orElse(mcl.moduleLoader()).loadModule(dependency.moduleName());
+                        if (dep == null) {
+                            if (dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
+                                continue;
                             }
+                            throw new ModuleLoadException("Failed to link " + moduleName + ": dependency from " + mcl.moduleName
+                                + " to " + dependency.moduleName() + " is missing");
+                        }
+                        linkExportedPackages(linkState, dep, modulesByPackage, visited);
+                    }
+                }
+            } else {
+                Module module = loaded.module();
+                Set<String> packages = module.getPackages();
+                for (String pkg : packages) {
+                    if (module.isExported(pkg, linkState.module())) {
+                        modulesByPackage.putIfAbsent(pkg, module);
+                    }
+                }
+                java.lang.module.ModuleDescriptor descriptor = module.getDescriptor();
+                if (descriptor != null) {
+                    for (java.lang.module.ModuleDescriptor.Requires require : descriptor.requires()) {
+                        if (require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.TRANSITIVE)) {
+                            Optional<Module> optDep = module.getLayer().findModule(require.name());
+                            if (optDep.isEmpty()) {
+                                if (require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC)) {
+                                    continue;
+                                }
+                                throw new ModuleLoadException("Failed to link " + moduleName + ": dependency from " + module.getName()
+                                    + " to " + require.name() + " is missing");
+                            }
+                            linkExportedPackages(linkState, LoadedModule.forModule(optDep.get()), modulesByPackage, visited);
                         }
                     }
                 }
@@ -703,32 +707,23 @@ public class ModuleClassLoader extends ClassLoader {
         if (linkState instanceof LinkState.Linked linked) {
             return linked;
         }
-        List<Dependency> dependencies = linkState.dependencies();
-        List<LoadedModule> loaders = new ArrayList<>(dependencies.size());
         HashSet<LoadedModule> visited = new HashSet<>();
-        for (Dependency dependency : dependencies) {
-            resolveDependencies(linkState, dependency, loaders, visited);
-        }
-        // the actual map to build
         HashMap<String, Module> modulesByPackage = new HashMap<>();
-        for (LoadedModule lm : loaders) {
+        for (Dependency dependency : linkState.dependencies()) {
+            // todo: we're still linking the first row of dependencies twice
+            String depName = dependency.moduleName();
+            LoadedModule lm = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
+            if (lm == null) {
+                if (dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
+                    continue;
+                }
+                throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
+            }
             Module module = lm.module();
+            linkState.addReads(module);
             // skip java.base for memory efficiency (everyone reads it)
             if (module != javaBase) {
-                if (lm.classLoader() instanceof ModuleClassLoader mcl) {
-                    Set<String> packages = mcl.linkInitial().packages();
-                    for (String pkg : packages) {
-                        if (mcl.exportedPackages().contains(pkg) || module.isExported(pkg, linkState.module())) {
-                            modulesByPackage.putIfAbsent(pkg, module);
-                        }
-                    }
-                }
-                Set<String> packages = module.getPackages();
-                for (String pkg : packages) {
-                    if (module.isExported(pkg, linkState.module())) {
-                        modulesByPackage.putIfAbsent(pkg, module);
-                    }
-                }
+                linkExportedPackages(linkState, lm, modulesByPackage, visited);
             }
         }
         // and don't forget our own packages

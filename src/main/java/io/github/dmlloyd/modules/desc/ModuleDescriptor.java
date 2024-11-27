@@ -72,6 +72,26 @@ public record ModuleDescriptor(
         packages = Set.copyOf(packages);
     }
 
+    public ModuleDescriptor withName(final String name) {
+        return new ModuleDescriptor(
+            name,
+            version,
+            classLoaderName,
+            modifiers,
+            mainClass,
+            location,
+            classLoaderFactory,
+            dependencies,
+            exports,
+            opens,
+            uses,
+            provides,
+            resourceLoaderOpeners,
+            packages
+        );
+    }
+
+
     public ModuleDescriptor withResourceLoaders(final List<ResourceLoaderOpener> resourceLoaderOpeners) {
         return new ModuleDescriptor(
             name,
