@@ -184,7 +184,7 @@ public class ModuleLoader implements Closeable {
                 }
                 loader = desc.classLoaderFactory().apply(new ModuleClassLoader.ClassLoaderConfiguration(
                     this,
-                    name(),
+                    desc.classLoaderName().orElse(name()),
                     List.of(resourceLoaders),
                     moduleName,
                     desc.version().orElse(null),

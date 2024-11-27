@@ -320,7 +320,7 @@ public record ModuleDescriptor(
                     return new ModuleDescriptor(
                         name,
                         version,
-                        Optional.empty(),
+                        mods.contains(Modifier.UNNAMED) ? version.isPresent() ? Optional.of("[" + name + "@" + version.get() + "]") : Optional.of("[" + name + "]")  : Optional.empty(),
                         mods,
                         mainClass,
                         Optional.empty(),

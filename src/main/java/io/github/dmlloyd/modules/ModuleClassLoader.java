@@ -577,11 +577,11 @@ public class ModuleClassLoader extends ClassLoader {
         }
         log.debugf("Linking module %s to dependencies state", moduleName);
         // todo: this is really stupid. maybe just do it the normal way?
-        Map<String, List<String>> depServices = loadedDependencies.stream().flatMap(lm ->
+        Map<String, List<String>> depServices = Stream.concat(loadedDependencies.stream().flatMap(lm ->
             lm.classLoader() instanceof ModuleClassLoader mcl ?
             mcl.linkInitial().provides().entrySet().stream() :
             lm.module().getDescriptor().provides().stream().map(p -> Map.entry(p.service(), p.providers()))
-        ).collect(
+        ), linkState.provides().entrySet().stream()).collect(
             Collectors.groupingBy(Map.Entry::getKey,
                 Collectors.mapping(Map.Entry::getValue,
                     Collectors.flatMapping(Collection::stream,
