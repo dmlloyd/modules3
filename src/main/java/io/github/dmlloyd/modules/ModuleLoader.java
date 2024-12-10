@@ -3,9 +3,12 @@ package io.github.dmlloyd.modules;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
+import io.github.dmlloyd.modules.desc.Dependency;
+import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.constraint.Assert;
@@ -14,11 +17,24 @@ import io.smallrye.common.resource.ResourceLoader;
 /**
  * A loader for modules.
  */
+/*
+  Groupings:
+
+
+  module (internal)
+  module (exported)
+  reads (dep)
+  requires (dep, eager)
+  co-habitation (same layer, different CL)
+  module layer delegation (very strong dep, eager)
+
+ */
 public class ModuleLoader implements Closeable {
     private final String name;
     private final ModuleFinder moduleFinder;
     private final ReentrantLock defineLock = new ReentrantLock();
     private final ConcurrentHashMap<String, ModuleClassLoader> loaders = new ConcurrentHashMap<>();
+    private final List<String> implied;
     private volatile boolean closed;
 
     private static final Module javaBase = Object.class.getModule();
@@ -33,6 +49,14 @@ public class ModuleLoader implements Closeable {
     public ModuleLoader(final String name, final ModuleFinder moduleFinder) {
         this.name = Assert.checkNotNullParam("name", name);
         this.moduleFinder = Assert.checkNotNullParam("moduleFinder", moduleFinder);
+        implied = List.of();
+    }
+
+    ModuleLoader(final String name, final ModuleFinder moduleFinder, final List<String> implied) {
+        // todo: temp
+        this.name = Assert.checkNotNullParam("name", name);
+        this.moduleFinder = Assert.checkNotNullParam("moduleFinder", moduleFinder);
+        this.implied = implied;
     }
 
     /**
@@ -153,6 +177,7 @@ public class ModuleLoader implements Closeable {
         if (! desc.name().equals(moduleName)) {
             throw new ModuleLoadException("Module name \"" + moduleName + "\" does not match descriptor module name \"" + desc.name() + "\"");
         }
+        desc = desc.withAdditionalDependencies(implied.stream().map(name -> new Dependency(name, Dependency.Modifier.SYNTHETIC)).toList());
         ConcurrentHashMap<String, ModuleClassLoader> loaders = this.loaders;
         ReentrantLock lock = defineLock;
         lock.lock();

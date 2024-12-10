@@ -51,7 +51,6 @@ public final class BasicTests {
         assertNotNull(resolved);
         assertNotNull(resolved.classLoader().loadClass("java.lang.Object"));
         assertEquals("1.2.3", resolved.module().getDescriptor().rawVersion().orElseThrow(NullPointerException::new));
-        resolved.classLoader().loadClass("$internal.Utils");
     }
 
     @Test

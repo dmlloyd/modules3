@@ -111,6 +111,29 @@ public record ModuleDescriptor(
         );
     }
 
+    public ModuleDescriptor withAdditionalDependencies(final List<Dependency> list) {
+        if (list.isEmpty()) {
+            return this;
+        } else {
+            return new ModuleDescriptor(
+                name,
+                version,
+                classLoaderName,
+                modifiers,
+                mainClass,
+                location,
+                classLoaderFactory,
+                Stream.concat(dependencies.stream(), list.stream()).toList(),
+                exports,
+                opens,
+                uses,
+                provides,
+                resourceLoaderOpeners,
+                packages
+            );
+        }
+    }
+
     /**
      * Module-wide modifiers.
      */
@@ -125,8 +148,15 @@ public record ModuleDescriptor(
          */
         OPEN,
         /**
+         * Define the module as "automatic" which exports and opens all packages.
+         * Automatic modules also can use any service.
+         * A module cannot be both automatic and unnamed.
+         */
+        AUTOMATIC,
+        /**
          * Define the module as an "unnamed" module, which
          * reads all modules.
+         * A module cannot be both automatic and unnamed.
          */
         UNNAMED,
     }
@@ -276,6 +306,11 @@ public record ModuleDescriptor(
             final String attrVal = xml.getAttributeValue(i);
             switch (xml.getAttributeLocalName(i)) {
                 case "name" -> name = attrVal;
+                case "automatic" -> {
+                    if (attrVal.equals("true")) {
+                        mods = mods.with(Modifier.AUTOMATIC);
+                    }
+                }
                 case "unnamed" -> {
                     if (attrVal.equals("true")) {
                         mods = mods.with(Modifier.UNNAMED);

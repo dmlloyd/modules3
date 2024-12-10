@@ -33,6 +33,10 @@ import io.smallrye.common.resource.ResourceLoader;
 public interface ModuleFinder extends Closeable {
     ModuleDescriptor findModule(String name);
 
+    default List<ModuleDescriptor> eagerLoadableModules() {
+        return List.of();
+    }
+
     default ModuleFinder andThen(ModuleFinder other) {
         if (this == EMPTY) {
             return other;
@@ -177,10 +181,13 @@ public interface ModuleFinder extends Closeable {
             for (Resource resource : ds) {
                 if (resource.isDirectory()) {
                     defaultPackageFinder(resource, packages);
-                } else if (resource.pathName().endsWith(".class")) {
-                    int idx = resource.pathName().lastIndexOf('/');
-                    if (idx != -1) {
-                        packages.add(resource.pathName().substring(0, idx).replace('/', '.'));
+                } else {
+                    String pathName = resource.pathName();
+                    if (pathName.endsWith(".class")) {
+                        int idx = pathName.lastIndexOf('/');
+                        if (idx != -1) {
+                            packages.add(pathName.substring(0, idx).replace('/', '.'));
+                        }
                     }
                 }
             }

@@ -35,6 +35,20 @@ public record Dependency(
     }
 
     /**
+     * Construct a new instance with no modifiers and no module loader.
+     *
+     * @param moduleName the dependency name (must not be {@code null})
+     * @param modifier the modifier to add (must not be {@code null})
+     */
+    public Dependency(String moduleName, Modifier modifier) {
+        this(moduleName, Modifiers.of(modifier), Optional.empty());
+    }
+
+    public boolean isNonSynthetic() {
+        return ! modifiers.contains(Modifier.SYNTHETIC);
+    }
+
+    /**
      * Modifiers for dependencies.
      */
     public enum Modifier implements ModifierFlag {

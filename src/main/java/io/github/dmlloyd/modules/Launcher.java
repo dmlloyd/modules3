@@ -9,14 +9,19 @@ import java.lang.module.ModuleDescriptor;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.logging.LogManager;
 import java.util.stream.Stream;
 
+import io.github.dmlloyd.modules.desc.Dependency;
 import io.smallrye.common.constraint.Assert;
 
 /**
@@ -31,7 +36,7 @@ public final class Launcher implements Runnable {
 
     public void run() {
         ModuleFinder finder = ModuleFinder.fromFileSystem(configuration.modulePath());
-        ModuleLoader loader = new DelegatingModuleLoader("app", finder, ModuleLoader.forLayer("boot", getClass().getModule().getLayer()));
+        ModuleLoader loader = new DelegatingModuleLoader("app", finder, ModuleLoader.forLayer("boot", Util.myLayer), configuration.implied());
         String launchName = configuration.launchName();
         Module bootModule;
         String mainClassName;
@@ -70,7 +75,7 @@ public final class Launcher implements Runnable {
                     } else {
                         ModuleDescriptor descriptor = bootModule.getDescriptor();
                         if (descriptor != null) {
-                            mainClassName = descriptor.mainClass().orElseThrow(IllegalArgumentException::new);
+                            mainClassName = descriptor.mainClass().orElseThrow(NoSuchElementException::new);
                         } else {
                             mainClassName = null;
                         }
@@ -82,10 +87,7 @@ public final class Launcher implements Runnable {
             default -> throw new IllegalStateException();
         }
         if (configuration.infoOnly()) {
-            System.out.printf("""
-                TODO: print module info
-                
-                """);
+            printModuleInfo(bootModule, new HashSet<>(), new HashSet<>(), "");
             return;
         }
         if (mainClassName == null) {
@@ -126,6 +128,98 @@ public final class Launcher implements Runnable {
         }
     }
 
+    private void printModuleInfo(final Module module, final Set<Module> visited, final Set<Module> path, final String prefix) {
+        System.out.print(module.getName());
+        module.getDescriptor().rawVersion().ifPresent(v -> System.out.print("@" + v));
+        boolean wasVisited = ! visited.add(module);
+        if (path.add(module)) {
+            try {
+                // not a loop
+                ClassLoader cl = module.getClassLoader();
+                if (cl instanceof ModuleClassLoader mcl) {
+                    System.out.println();
+                    List<Dependency> dependencies = mcl.linkDependencies().dependencies();
+                    Iterator<LoadedModule> iter = mapped(filtered(dependencies.iterator(), Dependency::isNonSynthetic), d -> d.moduleLoader().orElse(mcl.moduleLoader()).loadModule(d.moduleName()));
+                    if (iter.hasNext()) {
+                        if (wasVisited) {
+                            return;
+                        }
+                        LoadedModule current = iter.next();
+                        while (iter.hasNext()) {
+                            LoadedModule next = iter.next();
+                            System.out.print(prefix);
+                            System.out.print(" ├─ ");
+                            printModuleInfo(current.module(), visited, path, prefix.concat(" │  "));
+                            current = next;
+                        }
+                        System.out.print(prefix);
+                        System.out.print(" └─ ");
+                        printModuleInfo(current.module(), visited, path, prefix.concat("    "));
+                    }
+                } else {
+                    System.out.print(" (");
+                    if (cl == null) {
+                        System.out.print("boot");
+                    } else if (cl.getName() == null) {
+                        System.out.print(cl);
+                    } else {
+                        System.out.print(cl.getName());
+                    }
+                    System.out.println(")");
+                }
+            } finally {
+                path.remove(module);
+            }
+        } else {
+            // a loop; end here
+            System.out.println(" ↺");
+        }
+    }
+
+    static <E, R> Iterator<R> mapped(Iterator<E> orig, Function<E, R> mapper) {
+        return new Iterator<R>() {
+            public boolean hasNext() {
+                return orig.hasNext();
+            }
+
+            public R next() {
+                return mapper.apply(orig.next());
+            }
+        };
+    }
+
+    static <E> Iterator<E> filtered(Iterator<E> orig, Predicate<E> test) {
+        return new Iterator<E>() {
+            E next;
+
+            public boolean hasNext() {
+                while (next == null) {
+                    if (! orig.hasNext()) {
+                        return false;
+                    }
+                    E next = orig.next();
+                    if (next == null) {
+                        throw new NullPointerException();
+                    }
+                    if (test.test(next)) {
+                        this.next = next;
+                        return true;
+                    }
+                }
+                return true;
+            }
+
+            public E next() {
+                if (! hasNext()) throw new NoSuchElementException();
+                try {
+                    return next;
+                } finally {
+                    next = null;
+                }
+            }
+        };
+    }
+
     /**
      * The runnable main entry point.
      * This method exits the JVM when the program finishes.
@@ -153,6 +247,7 @@ public final class Launcher implements Runnable {
         }
         args = List.copyOf(args);
         Iterator<String> iterator = args.iterator();
+        List<String> implied = List.of();
         List<Path> modulePath = List.of(Path.of("."));
         Mode mode = Mode.MODULE;
         boolean infoOnly = false;
@@ -167,9 +262,10 @@ public final class Launcher implements Runnable {
                             --help                    Display this message
                             -mp,--module-path <paths> Specifies the location of the module root(s)
                                                       as a list of paths separated by `%s` characters
+                            --implied <module-name>   Add implicit module dependency to all modules TODO: TEMPORARY
                             --jar                     Run a modular JAR in the modular environment
                             --info                    Display information about the module instead of running it
-                        
+                                                
                         Additionally, it is recommended to pass --enable-native-access=io.github.dmlloyd.modules on
                         Java 22 or later to ensure that permitted submodules can also have native access enabled.
                         Granting this capability will transitively grant the capability to any module which is configured
@@ -189,6 +285,13 @@ public final class Launcher implements Runnable {
                     System.out.printf("Version: %s%n", version);
                     System.out.flush();
                     return 0;
+                }
+                case "--implied" -> {
+                    System.err.println("WARNING: the --implied option is temporary");
+                    if (implied.isEmpty()) {
+                        implied = new ArrayList<>();
+                    }
+                    implied.add(iterator.next());
                 }
                 case "-mp", "--module-path" -> {
                     if (! iterator.hasNext()) {
@@ -220,7 +323,7 @@ public final class Launcher implements Runnable {
                         System.err.flush();
                         return 1;
                     }
-                    Configuration conf = new Configuration(argument, mode, infoOnly, modulePath, listOf(iterator));
+                    Configuration conf = new Configuration(argument, mode, infoOnly, modulePath, listOf(iterator), implied);
                     Launcher launcher = new Launcher(conf);
                     launcher.run();
                     return 0;
@@ -260,12 +363,13 @@ public final class Launcher implements Runnable {
         JAR,
     }
 
-    public record Configuration(String launchName, Mode launchMode, boolean infoOnly, List<Path> modulePath, List<String> arguments) {
+    public record Configuration(String launchName, Mode launchMode, boolean infoOnly, List<Path> modulePath, List<String> arguments, List<String> implied) {
         public Configuration {
             Assert.checkNotNullParam("launchName", launchName);
             Assert.checkNotNullParam("launchMode", launchMode);
             modulePath = List.copyOf(modulePath);
             arguments = List.copyOf(arguments);
+            implied = List.copyOf(implied);
         }
     }
 }

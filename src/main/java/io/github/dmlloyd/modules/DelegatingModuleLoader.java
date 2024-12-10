@@ -1,5 +1,6 @@
 package io.github.dmlloyd.modules;
 
+import java.util.List;
 import java.util.function.Function;
 
 import io.smallrye.common.constraint.Assert;
@@ -32,6 +33,11 @@ public final class DelegatingModuleLoader extends ModuleLoader {
     public DelegatingModuleLoader(final String name, final ModuleFinder moduleFinder, final ModuleLoader delegate) {
         this(name, moduleFinder, __ -> delegate);
         Assert.checkNotNullParam("delegate", delegate);
+    }
+
+    DelegatingModuleLoader(final String app, final ModuleFinder finder, final ModuleLoader delegate, final List<String> implied) {
+        super(app, finder, implied);
+        delegateFn = __ -> delegate;
     }
 
     protected LoadedModule doLoadModule(final String moduleName) {

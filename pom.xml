@@ -38,7 +38,7 @@
         <dependency>
             <groupId>io.github.dmlloyd</groupId>
             <artifactId>jdk-classfile-backport</artifactId>
-            <version>24.beta6</version>
+            <version>24.cr2</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.logging</groupId>
@@ -55,6 +55,12 @@
 
     <build>
         <plugins>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>--add-opens java.base/java.lang=io.github.dmlloyd.modules --add-exports java.base/jdk.internal.module=io.github.dmlloyd.modules</argLine>
+                </configuration>
+            </plugin>
             <plugin>
                 <artifactId>maven-jar-plugin</artifactId>
                 <version>3.4.2</version>

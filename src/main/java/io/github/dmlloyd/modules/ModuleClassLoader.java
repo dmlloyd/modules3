@@ -1,26 +1,18 @@
 package io.github.dmlloyd.modules;
 
-import static java.lang.constant.ConstantDescs.*;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.lang.constant.ClassDesc;
-import java.lang.constant.MethodTypeDesc;
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.MethodType;
 import java.lang.module.Configuration;
 import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReader;
 import java.lang.module.ModuleReference;
-import java.lang.reflect.UndeclaredThrowableException;
 import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.ProtectionDomain;
-import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,9 +22,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 import java.util.stream.Collectors;
@@ -59,8 +53,8 @@ import org.jboss.logging.Logger;
  * A class loader for a module.
  */
 public class ModuleClassLoader extends ClassLoader {
-
     public static final ClassDesc CD_Module = ClassDesc.of("java.lang.Module");
+
 
     static {
         if (! ClassLoader.registerAsParallelCapable()) {
@@ -76,6 +70,7 @@ public class ModuleClassLoader extends ClassLoader {
     private final String moduleVersion;
     private final ModuleLoader moduleLoader;
     private final String mainClassName;
+    private final Set<ModuleLayer> registeredLayers = ConcurrentHashMap.newKeySet();
 
     /**
      * The lock used for certain linking operations.
@@ -147,18 +142,23 @@ public class ModuleClassLoader extends ClassLoader {
         }
         String dotName = name.replace('/', '.');
         String packageName = Util.packageName(dotName);
-        if (packageName.isEmpty() || packageName.equals("$internal")) {
+        if (packageName.isEmpty()) {
             return loadClassDirect(name);
         }
         if (bootModuleIndex.containsKey(packageName)) {
             if (dotName.equals("java.util.ServiceLoader")) {
                 // loading services! extra linking required
-                linkServices();
+                linkUses();
             }
             // -> BootLoader.loadClass(...)
-            return Class.forName(bootModuleIndex.get(packageName), name);
+            Class<?> result = Class.forName(bootModuleIndex.get(packageName), dotName);
+            if (result != null) {
+                return result;
+            } else {
+                throw new ClassNotFoundException("Cannot find " + name + " from " + this);
+            }
         }
-        Module module = linkFull().modulesByPackage().get(packageName);
+        Module module = linkPackages().modulesByPackage().get(packageName);
         if (module == null) {
             throw new ClassNotFoundException("Class loader for " + this + " does not link against package `" + packageName + "`");
         }
@@ -245,7 +245,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     public final Set<String> exportedPackages() {
-        return linkFull().exportedPackages();
+        return linkPackages().exportedPackages();
     }
 
     /**
@@ -266,6 +266,13 @@ public class ModuleClassLoader extends ClassLoader {
         return "ModuleClassLoader[" + moduleName + "]";
     }
 
+    // special
+
+
+    protected <R> R resolving(Function<String, Class<?>> resolver, Supplier<R> action) {
+        throw new UnsupportedOperationException("TODO");
+    }
+
     // private
 
     /**
@@ -282,14 +289,15 @@ public class ModuleClassLoader extends ClassLoader {
         if (resource == null) {
             return null;
         }
-        if (resource.pathName().endsWith(".class")) {
+        String pathName = resource.pathName();
+        if (pathName.endsWith(".class")) {
             return resource;
         }
         if (caller == null || caller.getModule().getClassLoader() == this) {
             return resource;
         }
-        String pkgName = Util.resourcePackageName(resource.pathName());
-        if (pkgName.isEmpty()) {
+        String pkgName = Util.resourcePackageName(pathName);
+        if (pkgName.isEmpty() || ! linkDefined().packages().contains(pkgName)) {
             return resource;
         }
         if (linkDefined().exportedPackages().contains(pkgName)) {
@@ -315,6 +323,9 @@ public class ModuleClassLoader extends ClassLoader {
             return resources;
         }
         String pkgName = Util.resourcePackageName(pathName);
+        if (pkgName.isEmpty() || ! linkDefined().packages().contains(pkgName)) {
+            return resources;
+        }
         if (linkDefined().exportedPackages().contains(pkgName)) {
             return resources;
         }
@@ -340,29 +351,8 @@ public class ModuleClassLoader extends ClassLoader {
         if (loaded != null) {
             return loaded;
         }
+        LinkState.Packages linked = linkPackages();
         String packageName = Util.packageName(dotName);
-        if (packageName.equals("$internal")) {
-            return switch (dotName) {
-                case "$internal.Utils" -> {
-                    ClassDesc utilsDesc = ClassDesc.of("$internal.Utils");
-                    yield defineOrGetClass(dotName, ByteBuffer.wrap(ClassFile.of().build(utilsDesc, zb -> {
-                        zb.withVersion(ClassFile.JAVA_17_VERSION, 0);
-                        zb.withSuperclass(CD_Object);
-                        zb.withMethod("use", MethodTypeDesc.of(CD_void, CD_Class), ClassFile.ACC_PRIVATE | ClassFile.ACC_STATIC, mb -> {
-                            mb.withCode(cb -> {
-                                cb.ldc(utilsDesc);
-                                cb.invokevirtual(CD_Class, "getModule", MethodTypeDesc.of(CD_Module));
-                                cb.aload(cb.parameterSlot(0));
-                                cb.invokevirtual(CD_Module, "addUses", MethodTypeDesc.of(CD_Module, CD_Class));
-                                cb.return_();
-                            });
-                        });
-                    })), null);
-                }
-                default -> throw new ClassNotFoundException("Invalid internal class");
-            };
-        }
-        LinkState.Linked linked = linkFull();
         if (! packageName.isEmpty() && ! linked.packages().contains(packageName)) {
             throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from " + moduleName);
         }
@@ -387,7 +377,7 @@ public class ModuleClassLoader extends ClassLoader {
             // this is always loaded as a resource
             return loadModuleInfo();
         }
-        if (name.startsWith("META-INF/services/") && name.lastIndexOf('/') == 17) {
+        if (isServiceFileName(name)) {
             return loadServicesFileDirect(name);
         }
         for (ResourceLoader loader : linkInitial().resourceLoaders()) {
@@ -399,13 +389,17 @@ public class ModuleClassLoader extends ClassLoader {
         return null;
     }
 
+    private static boolean isServiceFileName(final String name) {
+        return name.startsWith("META-INF/services/") && name.lastIndexOf('/') == 17;
+    }
+
     final List<Resource> loadResourcesDirect(final String name) throws IOException {
         // TODO: canonicalize
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
             return Optional.ofNullable(loadModuleInfo()).map(List::of).orElse(List.of());
         }
-        if (name.startsWith("META-INF/services/") && name.lastIndexOf('/') == 17) {
+        if (isServiceFileName(name)) {
             return Optional.ofNullable(loadServicesFileDirect(name)).map(List::of).orElse(List.of());
         }
         try {
@@ -422,7 +416,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private Resource loadServicesFileDirect(final String name) {
-        List<String> services = linkDependencies().providedServices().getOrDefault(name.substring(18), List.of());
+        List<String> services = linkDependencies().provides().getOrDefault(name.substring(18), List.of());
         if (services.isEmpty()) {
             return null;
         }
@@ -451,18 +445,16 @@ public class ModuleClassLoader extends ClassLoader {
         }
         Manifest manifest = null;
         ResourceLoader loader = null;
-        if (! name.equals("$internal")) {
-            List<ResourceLoader> list = linkDefined().resourceLoaders();
-            for (ResourceLoader rl : list) {
-                try {
-                    manifest = rl.manifest();
-                } catch (IOException e) {
-                    throw new IllegalStateException("Failed to load manifest for package " + name, e);
-                }
-                if (manifest != null) {
-                    loader = rl;
-                    break;
-                }
+        List<ResourceLoader> list = linkDefined().resourceLoaders();
+        for (ResourceLoader rl : list) {
+            try {
+                manifest = rl.manifest();
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to load manifest for package " + name, e);
+            }
+            if (manifest != null) {
+                loader = rl;
+                break;
             }
         }
         // todo: change this to use the manifest of the JAR which contains the package
@@ -542,7 +534,7 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
-    private LinkState.Initial linkInitial() {
+    LinkState.Initial linkInitial() {
         LinkState linkState = this.linkState;
         if (linkState instanceof LinkState.Initial state) {
             return state;
@@ -551,7 +543,7 @@ public class ModuleClassLoader extends ClassLoader {
         throw new IllegalStateException("Module " + moduleName + " has been unloaded");
     }
 
-    private LinkState.Dependencies linkDependencies() {
+    LinkState.Dependencies linkDependencies() {
         LinkState.Initial linkState = linkInitial();
         if (linkState instanceof LinkState.Dependencies deps) {
             return deps;
@@ -575,20 +567,19 @@ public class ModuleClassLoader extends ClassLoader {
         if (linkState instanceof LinkState.Dependencies deps) {
             return deps;
         }
-        log.debugf("Linking module %s to dependencies state", moduleName);
-        // todo: this is really stupid. maybe just do it the normal way?
-        Map<String, List<String>> depServices = Stream.concat(loadedDependencies.stream().flatMap(lm ->
-            lm.classLoader() instanceof ModuleClassLoader mcl ?
-            mcl.linkInitial().provides().entrySet().stream() :
-            lm.module().getDescriptor().provides().stream().map(p -> Map.entry(p.service(), p.providers()))
-        ), linkState.provides().entrySet().stream()).collect(
-            Collectors.groupingBy(Map.Entry::getKey,
-                Collectors.mapping(Map.Entry::getValue,
-                    Collectors.flatMapping(Collection::stream,
-                        Collectors.toUnmodifiableList()))));
-        LinkState.Dependencies newState = new LinkState.Dependencies(linkState, loadedDependencies, Map.copyOf(depServices));
+        LinkState.Dependencies newState = new LinkState.Dependencies(linkState, loadedDependencies);
         this.linkState = newState;
         return newState;
+    }
+
+    private static Set<java.lang.module.ModuleDescriptor.Modifier> toJlmModifiers(Modifiers<ModuleDescriptor.Modifier> modifiers) {
+        if (modifiers.contains(ModuleDescriptor.Modifier.AUTOMATIC)) {
+            return Set.of(java.lang.module.ModuleDescriptor.Modifier.AUTOMATIC);
+        } else if (modifiers.contains(ModuleDescriptor.Modifier.OPEN)) {
+            return Set.of(java.lang.module.ModuleDescriptor.Modifier.OPEN);
+        } else {
+            return Set.of();
+        }
     }
 
     private LinkState.Defined linkDefined() {
@@ -597,15 +588,28 @@ public class ModuleClassLoader extends ClassLoader {
             return defined;
         }
         java.lang.module.ModuleDescriptor descriptor;
-        Resource moduleInfo = loadModuleInfo();
-        if (moduleInfo != null) {
-            try (InputStream is = moduleInfo.openStream()) {
-                descriptor = java.lang.module.ModuleDescriptor.read(is);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        } else {
+        if (linkState.modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
             descriptor = null;
+        } else {
+            java.lang.module.ModuleDescriptor.Builder builder = java.lang.module.ModuleDescriptor.newModule(
+                moduleName,
+                toJlmModifiers(linkState.modifiers())
+            );
+            try {
+                java.lang.module.ModuleDescriptor.Version v = java.lang.module.ModuleDescriptor.Version.parse(moduleVersion);
+                builder.version(v);
+            } catch (IllegalArgumentException ignored) {
+            }
+            builder.packages(linkState.packages());
+            if (mainClassName != null) {
+                // not actually used, but for completeness...
+                builder.mainClass(mainClassName);
+            }
+            if (! linkState.modifiers().contains(ModuleDescriptor.Modifier.AUTOMATIC)) {
+                linkState.exports().stream().filter(e -> e.targets().isEmpty()).forEach(e -> builder.exports(e.packageName()));
+                linkState.opens().stream().filter(e -> e.targets().isEmpty()).forEach(e -> builder.opens(e.packageName()));
+            }
+            descriptor = builder.build();
         }
         return doLocked(ModuleClassLoader::linkDefinedLocked, descriptor);
     }
@@ -629,24 +633,33 @@ public class ModuleClassLoader extends ClassLoader {
                     throw new UnsupportedOperationException();
                 }
             };
-            final Configuration cf = ModuleLayer.boot().configuration().resolve(
+            List<Configuration> parentConfigs = List.of(ModuleLayer.boot().configuration());
+            final Configuration cf = Configuration.resolve(
                 new SingleModuleFinder(modRef),
+                parentConfigs,
                 Util.EMPTY_MF,
                 List.of(moduleName)
             );
-            ModuleLayer.Controller ctl = ModuleLayer.defineModules(cf, List.of(ModuleLayer.boot()), __ -> this);
+            ModuleLayer.Controller ctl = ModuleLayer.defineModules(cf, List.of(ModuleLayer.boot()), name -> {
+                if (name.equals(moduleName)) {
+                    return this;
+                } else {
+                    throw new IllegalStateException("Wrong module name: " + name + " (expected " + moduleName + ")");
+                }
+            });
             ModuleLayer moduleLayer = ctl.layer();
             Module module = moduleLayer.findModule(moduleName).orElseThrow(IllegalStateException::new);
+            // xxx - for service loading hack
             if (linkState.modifiers().contains(ModuleDescriptor.Modifier.NATIVE_ACCESS)) {
-                NativeAccessImpl.enableNativeAccess(ctl, module);
+                Util.enableNativeAccess(ctl, module);
             }
-            ctl.addOpens(module, "$internal", getClass().getModule());
             defined = new LinkState.Defined(
                 linkState,
                 module,
                 ctl,
                 exportedPackages
             );
+            defined.addReads(Util.myModule);
         }
         this.linkState = defined;
         return defined;
@@ -703,9 +716,9 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
-    private LinkState.Linked linkFull() {
+    private LinkState.Packages linkPackages() {
         LinkState.Defined linkState = linkDefined();
-        if (linkState instanceof LinkState.Linked linked) {
+        if (linkState instanceof LinkState.Packages linked) {
             return linked;
         }
         HashSet<LoadedModule> visited = new HashSet<>();
@@ -754,17 +767,17 @@ public class ModuleClassLoader extends ClassLoader {
                 }
             }
         }
-        return doLocked(ModuleClassLoader::linkFullLocked, modulesByPackage);
+        return doLocked(ModuleClassLoader::linkPackagesLocked, modulesByPackage);
     }
 
-    private LinkState.Linked linkFullLocked(final Map<String, Module> modulesByPackage) {
+    private LinkState.Packages linkPackagesLocked(final Map<String, Module> modulesByPackage) {
         // double-check it inside the lock
         LinkState.Defined defined = linkDefined();
-        if (defined instanceof LinkState.Linked linked) {
+        if (defined instanceof LinkState.Packages linked) {
             return linked;
         }
-        log.debugf("Linking module %s to fully linked state", moduleName);
-        LinkState.Linked linked = new LinkState.Linked(
+        log.debugf("Linking module %s to packages state", moduleName);
+        LinkState.Packages linked = new LinkState.Packages(
             defined,
             Map.copyOf(modulesByPackage)
         );
@@ -772,10 +785,10 @@ public class ModuleClassLoader extends ClassLoader {
         return linked;
     }
 
-    private LinkState.Services linkServices() {
-        LinkState.Linked linkState = linkFull();
-        if (linkState instanceof LinkState.Services srv) {
-            return srv;
+    LinkState.Provides linkProvides() {
+        LinkState.Packages linkState = linkPackages();
+        if (linkState instanceof LinkState.Provides st) {
+            return st;
         }
         for (String used : linkState.uses()) {
             try {
@@ -783,24 +796,76 @@ public class ModuleClassLoader extends ClassLoader {
             } catch (ClassNotFoundException ignored) {
             }
         }
-        return doLocked(ModuleClassLoader::linkServicesLocked);
+        // define provided services
+        for (Map.Entry<String, List<String>> entry : linkState.provides().entrySet()) {
+            Class<?> service;
+            try {
+                service = loadClass(entry.getKey());
+            } catch (ClassNotFoundException e) {
+                continue;
+            }
+            for (String implName : entry.getValue()) {
+                Class<?> impl;
+                try {
+                    impl = loadClassDirect(implName);
+                } catch (ClassNotFoundException e) {
+                    continue;
+                }
+                linkState.addProvider(service, impl);
+            }
+        }
+        return doLocked(ModuleClassLoader::linkProvidesLocked);
     }
 
-    private LinkState.Services linkServicesLocked() {
+    private LinkState.Provides linkProvidesLocked() {
         // double-check it inside the lock
-        LinkState.Linked linkState = linkFull();
-        if (linkState instanceof LinkState.Services srv) {
-            return srv;
+        LinkState.Packages linkState = linkPackages();
+        if (linkState instanceof LinkState.Provides st) {
+            return st;
         }
-        log.debugf("Linking module %s to fully linked + services state", moduleName);
-        LinkState.Services srv = new LinkState.Services(
+        log.debugf("Linking module %s to provides state", moduleName);
+        LinkState.Provides newState = new LinkState.Provides(
             linkState
         );
-        linkState = srv;
-        return srv;
+        this.linkState = newState;
+        return newState;
+    }
+
+    LinkState.Uses linkUses() {
+        LinkState.Provides linkState = linkProvides();
+        if (linkState instanceof LinkState.Uses st) {
+            return st;
+        }
+        for (LoadedModule dep : linkState.loadedDependencies()) {
+            if (dep.classLoader() instanceof ModuleClassLoader mcl) {
+                mcl.linkProvides();
+            }
+            registerLayer(dep.module().getLayer());
+        }
+        return doLocked(ModuleClassLoader::linkUsesLocked);
+    }
+
+    private LinkState.Uses linkUsesLocked() {
+        // double-check it inside the lock
+        LinkState.Provides linkState = linkProvides();
+        if (linkState instanceof LinkState.Uses st) {
+            return st;
+        }
+        log.debugf("Linking module %s to uses state", moduleName);
+        LinkState.Uses newState = new LinkState.Uses(
+            linkState
+        );
+        this.linkState = newState;
+        return newState;
     }
 
     // Private
+
+    private void registerLayer(ModuleLayer layer) {
+        if (registeredLayers.add(layer)) {
+            Util.bindLayerToLoader(layer, this);
+        }
+    }
 
     private int flagsOfModule(Modifiers<ModuleDescriptor.Modifier> mods) {
         int mask = AccessFlag.MODULE.mask();
@@ -825,8 +890,7 @@ public class ModuleClassLoader extends ClassLoader {
                     mab.moduleName(ModuleDesc.of(moduleName));
                     mab.moduleVersion(moduleVersion);
                     // java.base is always required
-                    mab.requires(ModuleDesc.of("java.base"), Set.of(AccessFlag.MANDATED), null);
-                    // other dependencies are ad-hoc; don't list them here
+                    mab.requires(ModuleDesc.of("java.base"), Set.of(AccessFlag.MANDATED, AccessFlag.SYNTHETIC), null);
                     // list unqualified exports
                     linkInitial().exports()
                         .stream()
@@ -839,11 +903,7 @@ public class ModuleClassLoader extends ClassLoader {
                         .forEach(o -> mab.opens(PackageDesc.of(o.packageName()), List.of()));
                 }
             ));
-            zb.with(ModulePackagesAttribute.of(
-                Stream.concat(
-                    linkInitial().packages().stream(),
-                    Stream.of("$internal")
-                )
+            zb.with(ModulePackagesAttribute.of(linkInitial().packages().stream()
                 .map(n -> zb.constantPool().packageEntry(PackageDesc.of(n)))
                 .toList()
             ));
@@ -876,8 +936,15 @@ public class ModuleClassLoader extends ClassLoader {
         if (! packageName.isEmpty()) {
             loadPackageDirect(packageName);
         }
+        Class<?> clazz = findLoadedClass(dotName);
+        if (clazz != null) {
+            return clazz;
+        }
         try {
             return defineClass(dotName, buffer, pd);
+        } catch (VerifyError e) {
+            // serious problem!
+            throw e;
         } catch (LinkageError e) {
             // probably a duplicate
             Class<?> loaded = findLoadedClass(dotName);
@@ -885,7 +952,7 @@ public class ModuleClassLoader extends ClassLoader {
                 return loaded;
             }
             // actually some other problem
-            throw e;
+            throw new LinkageError("Failed to link class " + dotName + " in " + this, e);
         }
     }
 
@@ -911,7 +978,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (defined != null) {
             return defined;
         }
-        Module module = linkFull().modulesByPackage().get(name);
+        Module module = linkPackages().modulesByPackage().get(name);
         if (module == null) {
             // no such package
             return null;
@@ -930,7 +997,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     protected final Package[] getPackages() {
-        return linkFull().modulesByPackage()
+        return linkPackages().modulesByPackage()
             .entrySet()
             .stream()
             .sorted()
@@ -1143,42 +1210,6 @@ public class ModuleClassLoader extends ClassLoader {
 
         public Set<ModuleReference> findAll() {
             return Set.of(modRef);
-        }
-    }
-
-    private static final class NativeAccessImpl {
-        private static final MethodHandle handle;
-
-        static {
-            MethodType methodType = MethodType.methodType(
-                ModuleLayer.Controller.class,
-                Module.class
-            );
-            MethodHandle h = null;
-            try {
-                h = MethodHandles.lookup().findVirtual(ModuleLayer.Controller.class, "enableNativeAccess", methodType);
-            } catch (NoSuchMethodException | IllegalAccessException ignored) {
-            }
-            if (h == null) {
-                h = MethodHandles.empty(methodType);
-            }
-            handle = h;
-        }
-
-        private NativeAccessImpl() {}
-
-        static void enableNativeAccess(final ModuleLayer.Controller ctl, final Module module) {
-            if (ctl == null) {
-                return;
-            }
-            try {
-                // force correct method signature
-                var ignored = (ModuleLayer.Controller) handle.invokeExact(ctl, module);
-            } catch (RuntimeException | Error e) {
-                throw e;
-            } catch (Throwable t) {
-                throw new UndeclaredThrowableException(t);
-            }
         }
     }
 

@@ -1,10 +1,7 @@
 package io.github.dmlloyd.modules;
 
-import static java.lang.invoke.MethodHandles.lookup;
-import static java.lang.invoke.MethodHandles.privateLookupIn;
+import static io.github.dmlloyd.modules.Util.*;
 
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodType;
 import java.net.URI;
 import java.security.CodeSigner;
 import java.security.CodeSource;
@@ -100,24 +97,18 @@ abstract class LinkState {
 
     static class Dependencies extends Initial {
         private final List<LoadedModule> loadedDependencies;
-        private final Map<String, List<String>> providedServices;
 
-        Dependencies(final Initial other, final List<LoadedModule> loadedDependencies, final Map<String, List<String>> providedServices) {
+        Dependencies(final Initial other, final List<LoadedModule> loadedDependencies) {
             super(other);
             this.loadedDependencies = loadedDependencies;
-            this.providedServices = providedServices;
         }
 
         Dependencies(Dependencies other) {
-            this(other, other.loadedDependencies, other.providedServices);
+            this(other, other.loadedDependencies);
         }
 
         List<LoadedModule> loadedDependencies() {
             return loadedDependencies;
-        }
-
-        Map<String, List<String>> providedServices() {
-            return providedServices;
         }
     }
 
@@ -125,7 +116,6 @@ abstract class LinkState {
         private final Module module;
         private final ModuleLayer.Controller layerController;
         private final Set<String> exportedPackages;
-        private final MethodHandle addUses;
 
         Defined(
             final Dependencies other,
@@ -137,13 +127,7 @@ abstract class LinkState {
             this.module = module;
             this.layerController = layerController;
             this.exportedPackages = exportedPackages;
-            getClass().getModule().addReads(module);
-            try {
-                Class<?> utils = ((ModuleClassLoader)module.getClassLoader()).loadClassDirect("$internal.Utils");
-                addUses = privateLookupIn(utils, lookup()).findStatic(utils, "use", MethodType.methodType(void.class, Class.class));
-            } catch (ClassNotFoundException | IllegalAccessException | NoSuchMethodException e) {
-                throw new IllegalStateException("Cannot open internal package of " + module.getName(), e);
-            }
+            myModule.addReads(module);
         }
 
         Defined(final Defined other) {
@@ -152,6 +136,10 @@ abstract class LinkState {
 
         Module module() {
             return module;
+        }
+
+        ModuleLayer layer() {
+            return module().getLayer();
         }
 
         void addReads(final Module target) {
@@ -185,10 +173,14 @@ abstract class LinkState {
         }
 
         void addUses(final Class<?> service) {
-            try {
-                addUses.invokeExact(service);
-            } catch (Throwable t) {
-                throw new IllegalStateException("Unexpected failure", t);
+            if (layerController != null) {
+                Util.addUses(module, service);
+            }
+        }
+
+        void addProvider(final Class<?> service, final Class<?> impl) {
+            if (layerController != null) {
+                Util.addProvides(module, service, impl);
             }
         }
 
@@ -197,17 +189,22 @@ abstract class LinkState {
         }
     }
 
-    static class Linked extends Defined {
+    static class Packages extends Defined {
         private final Map<String, Module> modulesByPackage;
-        private final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache;
 
-        Linked(Defined other, final Map<String, Module> modulesByPackage) {
+        private Packages(Defined other, Map<String, Module> modulesByPackage, ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache) {
             super(other);
             this.modulesByPackage = modulesByPackage;
+            this.pdCache = pdCache;
         }
 
-        Linked(Linked other) {
-            this(other, other.modulesByPackage);
+        Packages(Defined other, final Map<String, Module> modulesByPackage) {
+            this(other, modulesByPackage, new ConcurrentHashMap<>());
+        }
+
+        Packages(Packages other) {
+            this(other, other.modulesByPackage, other.pdCache);
         }
 
         Map<String, Module> modulesByPackage() {
@@ -218,7 +215,7 @@ abstract class LinkState {
             List<CodeSigner> codeSigners = List.copyOf(resource.codeSigners());
             ProtectionDomain pd = pdCache.get(codeSigners);
             if (pd == null) {
-                pd = new ProtectionDomain(new CodeSource(resource.url(), codeSigners.toArray(CodeSigner[]::new)), Util.ALL_PERMISSIONS);
+                pd = new ProtectionDomain(new CodeSource(resource.url(), codeSigners.toArray(CodeSigner[]::new)), ALL_PERMISSIONS);
                 ProtectionDomain appearing = pdCache.putIfAbsent(codeSigners, pd);
                 if (appearing != null) {
                     pd = appearing;
@@ -228,13 +225,23 @@ abstract class LinkState {
         }
     }
 
-    static class Services extends Linked {
-        Services(Linked other) {
+    static class Provides extends Packages {
+        Provides(Packages other) {
             super(other);
         }
 
-        Services(Services other) {
-            this((Linked)other);
+        Provides(Provides other) {
+            this((Packages) other);
+        }
+    }
+
+    static class Uses extends Provides {
+        Uses(Provides other) {
+            super(other);
+        }
+
+        Uses(Uses other) {
+            this((Provides) other);
         }
     }
 }
