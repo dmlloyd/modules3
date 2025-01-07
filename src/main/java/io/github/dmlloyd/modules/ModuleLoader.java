@@ -3,12 +3,10 @@ package io.github.dmlloyd.modules;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 import io.github.dmlloyd.modules.desc.Dependency;
-import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.constraint.Assert;
@@ -214,8 +212,6 @@ public class ModuleLoader implements Closeable {
                     moduleName,
                     desc.version().orElse(null),
                     desc.dependencies(),
-                    desc.exports(),
-                    desc.opens(),
                     desc.packages(),
                     desc.modifiers(),
                     desc.uses(),

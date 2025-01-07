@@ -12,9 +12,9 @@ import java.util.Set;
 import java.util.random.RandomGenerator;
 
 import io.github.dmlloyd.modules.desc.Dependency;
-import io.github.dmlloyd.modules.desc.Export;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
+import io.github.dmlloyd.modules.desc.Package;
 import org.junit.jupiter.api.Test;
 
 public final class BasicTests {
@@ -38,12 +38,10 @@ public final class BasicTests {
                             Optional.empty()
                         )
                     ),
-                    Set.of(new Export("test.foobar")),
-                    Set.of(),
                     Set.of(RandomGenerator.class.getName(), "java.lang.Unknown"),
                     Map.of("java.lang.Nothing", List.of("test.foobar.NonExistent")),
                     List.of(),
-                    Set.of("test.foobar", "test.foobar.impl")
+                    Map.of("test.foobar", Package.EXPORTED, "test.foobar.impl", Package.PRIVATE)
                 ) : null;
             }
         }, ModuleLoader.BOOT);

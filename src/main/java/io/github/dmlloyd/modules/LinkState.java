@@ -12,10 +12,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.dmlloyd.modules.desc.Dependency;
-import io.github.dmlloyd.modules.desc.Export;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.github.dmlloyd.modules.desc.Open;
+import io.github.dmlloyd.modules.desc.Package;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
 
@@ -34,19 +33,15 @@ abstract class LinkState {
     static class Initial extends LinkState {
         private final List<Dependency> dependencies;
         private final List<ResourceLoader> resourceLoaders;
-        private final Set<Export> exports;
-        private final Set<Open> opens;
-        private final Set<String> packages;
+        private final Map<String, Package> packages;
         private final Modifiers<ModuleDescriptor.Modifier> modifiers;
         private final Set<String> uses;
         private final Map<String, List<String>> provides;
         private final URI location;
 
-        Initial(final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Set<Export> exports, final Set<Open> opens, final Set<String> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Map<String, List<String>> provides, final URI location) {
+        Initial(final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Map<String, Package> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Map<String, List<String>> provides, final URI location) {
             this.dependencies = dependencies;
             this.resourceLoaders = resourceLoaders;
-            this.exports = exports;
-            this.opens = opens;
             this.packages = packages;
             this.modifiers = modifiers;
             this.uses = uses;
@@ -55,7 +50,7 @@ abstract class LinkState {
         }
 
         Initial(final Initial other) {
-            this(other.dependencies, other.resourceLoaders, other.exports, other.opens, other.packages, other.modifiers, other.uses, other.provides, other.location);
+            this(other.dependencies, other.resourceLoaders, other.packages, other.modifiers, other.uses, other.provides, other.location);
         }
 
         List<Dependency> dependencies() {
@@ -66,15 +61,7 @@ abstract class LinkState {
             return resourceLoaders;
         }
 
-        Set<Export> exports() {
-            return exports;
-        }
-
-        Set<Open> opens() {
-            return opens;
-        }
-
-        Set<String> packages() {
+        Map<String, Package> packages() {
             return packages;
         }
 

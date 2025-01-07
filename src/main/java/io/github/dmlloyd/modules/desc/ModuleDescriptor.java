@@ -2,7 +2,6 @@ package io.github.dmlloyd.modules.desc;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -47,12 +46,10 @@ public record ModuleDescriptor(
     Optional<URI> location,
     Function<ModuleClassLoader.ClassLoaderConfiguration, ModuleClassLoader> classLoaderFactory,
     List<Dependency> dependencies,
-    Set<Export> exports,
-    Set<Open> opens,
     Set<String> uses,
     Map<String, List<String>> provides,
     List<ResourceLoaderOpener> resourceLoaderOpeners,
-    Set<String> packages
+    Map<String, Package> packages
 ) {
 
     public ModuleDescriptor {
@@ -64,12 +61,11 @@ public record ModuleDescriptor(
         Assert.checkNotNullParam("location", location);
         Assert.checkNotNullParam("classLoaderFactory", classLoaderFactory);
         dependencies = List.copyOf(dependencies);
-        exports = Set.copyOf(exports);
-        opens = Set.copyOf(opens);
+        packages = Map.copyOf(packages);
         uses = Set.copyOf(uses);
         provides = Map.copyOf(provides);
         resourceLoaderOpeners = List.copyOf(resourceLoaderOpeners);
-        packages = Set.copyOf(packages);
+        packages = Map.copyOf(packages);
     }
 
     public ModuleDescriptor withName(final String name) {
@@ -82,8 +78,6 @@ public record ModuleDescriptor(
             location,
             classLoaderFactory,
             dependencies,
-            exports,
-            opens,
             uses,
             provides,
             resourceLoaderOpeners,
@@ -102,8 +96,6 @@ public record ModuleDescriptor(
             location,
             classLoaderFactory,
             dependencies,
-            exports,
-            opens,
             uses,
             provides,
             resourceLoaderOpeners,
@@ -124,8 +116,6 @@ public record ModuleDescriptor(
                 location,
                 classLoaderFactory,
                 Stream.concat(dependencies.stream(), list.stream()).toList(),
-                exports,
-                opens,
                 uses,
                 provides,
                 resourceLoaderOpeners,
@@ -191,6 +181,69 @@ public record ModuleDescriptor(
                 mods = mods.with(Modifier.NATIVE_ACCESS);
             }
         }
+        Map<String, Package> packagesMap = new HashMap<>();
+        ma.opens().forEach(e -> {
+            String packageName = e.openedPackage().name().stringValue().replace('/', '.').intern();
+            if (e.opensTo().isEmpty()) {
+                // open to all
+                packagesMap.put(packageName, Package.OPEN);
+            } else {
+                // open to some, otherwise private (for now)
+                packagesMap.put(packageName, new Package(
+                    PackageAccess.PRIVATE,
+                    Set.of(),
+                    e.opensTo().stream()
+                        .map(ModuleEntry::name)
+                        .map(Utf8Entry::stringValue)
+                        .map(String::intern)
+                        .collect(Collectors.toUnmodifiableSet()
+                    )
+                ));
+            }
+        });
+        ma.exports().forEach(e -> {
+            String packageName = e.exportedPackage().name().stringValue().replace('/', '.').intern();
+            if (e.exportsTo().isEmpty()) {
+                // exports to all
+                packagesMap.compute(packageName, (name, oldVal) -> {
+                    if (oldVal == null) {
+                        return Package.EXPORTED;
+                    } else if (oldVal.packageAccess() == PackageAccess.PRIVATE) {
+                        return new Package(PackageAccess.EXPORT, Set.of(), oldVal.openTargets());
+                    } else {
+                        // already exported (opened actually)
+                        return oldVal;
+                    }
+                });
+            } else {
+                // exports to some, otherwise whatever the existing level was
+                Set<String> exportTargets = e.exportsTo().stream()
+                    .map(ModuleEntry::name)
+                    .map(Utf8Entry::stringValue)
+                    .map(String::intern)
+                    .collect(Collectors.toUnmodifiableSet()
+                );
+                packagesMap.compute(packageName, (name, oldVal) -> {
+                    if (oldVal == null) {
+                        return new Package(PackageAccess.PRIVATE, exportTargets, Set.of());
+                    } else {
+                        return new Package(oldVal.packageAccess(), exportTargets, oldVal.openTargets());
+                    }
+                });
+            }
+        });
+        Stream<String> stream;
+        if (mpa.isEmpty()) {
+            stream = packageFinder.get().stream();
+        } else {
+            stream = mpa.get().packages().stream()
+                .map(PackageEntry::name)
+                .map(Utf8Entry::stringValue)
+                .map(s -> s.replace('/', '.'));
+        }
+        stream.map(String::intern).forEach(name ->
+            packagesMap.putIfAbsent(name, Package.PRIVATE)
+        );
         return new ModuleDescriptor(
             ma.moduleName().name().stringValue(),
             ma.moduleVersion().map(Utf8Entry::stringValue),
@@ -210,30 +263,6 @@ public record ModuleDescriptor(
                     Optional.empty()
                 )
             ).toList(),
-            ma.exports().stream().map(
-                e -> new Export(
-                    e.exportedPackage().name().stringValue().replace('/', '.'),
-                    Modifiers.of(),
-                    opt(e.exportsTo().stream()
-                        .map(ModuleEntry::name)
-                        .map(Utf8Entry::stringValue)
-                        .map(String::intern)
-                        .collect(Collectors.toUnmodifiableSet())
-                    )
-                )
-            ).collect(Collectors.toUnmodifiableSet()),
-            ma.opens().stream().map(
-                o -> new Open(
-                    o.openedPackage().name().stringValue().replace('/', '.'),
-                    Modifiers.of(),
-                    opt(o.opensTo().stream()
-                        .map(ModuleEntry::name)
-                        .map(Utf8Entry::stringValue)
-                        .map(String::intern)
-                        .collect(Collectors.toUnmodifiableSet())
-                    )
-                )
-            ).collect(Collectors.toUnmodifiableSet()),
             ma.uses().stream()
                 .map(ClassEntry::name)
                 .map(Utf8Entry::stringValue)
@@ -251,13 +280,7 @@ public record ModuleDescriptor(
                         .toList())
             ).collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue)),
             List.of(),
-            mpa.map(ModulePackagesAttribute::packages).map(p -> p.stream()
-                .map(PackageEntry::name)
-                .map(Utf8Entry::stringValue)
-                .map(s -> s.replace('/', '.'))
-                .map(String::intern)
-                .collect(Collectors.toUnmodifiableSet())
-            ).orElseGet(packageFinder)
+            packagesMap
         );
     }
 
@@ -295,11 +318,9 @@ public record ModuleDescriptor(
         Modifiers<Modifier> mods = Modifiers.of();
         Optional<String> mainClass = Optional.empty();
         List<Dependency> dependencies = List.of();
-        Set<Export> exports = Set.of();
-        Set<Open> opens = Set.of();
         Set<String> uses = Set.of();
         Map<String, List<String>> provides = Map.of();
-        Set<String> packages = Set.of();
+        Map<String, Package> packages = Map.of();
         // attributes
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
@@ -339,12 +360,7 @@ public record ModuleDescriptor(
                     checkNamespace(xml);
                     switch (xml.getLocalName()) {
                         case "dependencies" -> dependencies = parseDependenciesElement(xml);
-                        case "packages" -> {
-                            packages = new HashSet<>();
-                            exports = new HashSet<>();
-                            opens = new HashSet<>();
-                            parsePackagesElement(xml, packages, exports, opens);
-                        }
+                        case "packages" -> packages = parsePackagesElement(xml);
                         case "uses" -> uses = parseUsesElement(xml);
                         case "provides" -> provides = parseProvidesElement(xml);
                         case "main-class" -> mainClass = Optional.of(parseMainClassElement(xml));
@@ -355,14 +371,12 @@ public record ModuleDescriptor(
                     return new ModuleDescriptor(
                         name,
                         version,
-                        mods.contains(Modifier.UNNAMED) ? version.isPresent() ? Optional.of("[" + name + "@" + version.get() + "]") : Optional.of("[" + name + "]")  : Optional.empty(),
+                        mods.contains(Modifier.UNNAMED) ? version.isPresent() ? Optional.of("[" + name + "@" + version.get() + "]") : Optional.of("[" + name + "]") : Optional.empty(),
                         mods,
                         mainClass,
                         Optional.empty(),
                         ModuleClassLoader::new,
                         dependencies,
-                        exports,
-                        opens,
                         uses,
                         provides,
                         List.of(),
@@ -394,6 +408,7 @@ public record ModuleDescriptor(
     private static Dependency parseDependencyElement(final XMLStreamReader xml) throws XMLStreamException {
         String name = null;
         Modifiers<Dependency.Modifier> modifiers = Modifiers.of();
+        Map<String, PackageAccess> packageAccesses = Map.of();
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
             switch (xml.getAttributeLocalName(i)) {
@@ -416,37 +431,73 @@ public record ModuleDescriptor(
         }
         for (;;) {
             switch (xml.nextTag()) {
-                case XMLStreamConstants.START_ELEMENT -> throw unknownElement(xml);
+                case XMLStreamConstants.START_ELEMENT -> {
+                    checkNamespace(xml);
+                    switch (xml.getLocalName()) {
+                        case "access" -> {
+                            if (packageAccesses.isEmpty()) {
+                                packageAccesses = new HashMap<>();
+                            }
+                            parseAccessElement(xml, packageAccesses);
+                        }
+                        default -> throw unknownElement(xml);
+                    }
+                }
                 case XMLStreamConstants.END_ELEMENT -> {
-                    return new Dependency(name, modifiers, Optional.empty());
+                    return new Dependency(name, modifiers, Optional.empty(), packageAccesses);
                 }
             }
         }
     }
 
-    private static void parsePackagesElement(final XMLStreamReader xml, final Set<String> packages, final Set<Export> exports, final Set<Open> opens) throws XMLStreamException {
+    private static void parseAccessElement(final XMLStreamReader xml, final Map<String, PackageAccess> packageAccesses) throws XMLStreamException {
+        String name = null;
+        PackageAccess access = PackageAccess.EXPORT;
+        int cnt = xml.getAttributeCount();
+        for (int i = 0; i < cnt; i ++) {
+            switch (xml.getAttributeLocalName(i)) {
+                case "name" -> name = xml.getAttributeValue(i);
+                case "level" -> access = switch (xml.getAttributeValue(i)) {
+                    case "export" -> PackageAccess.EXPORT;
+                    case "open" -> PackageAccess.OPEN;
+                    default -> throw unknownAttributeValue(xml, i);
+                };
+                default -> throw unknownAttribute(xml, i);
+            }
+        }
+        if (name == null) {
+            throw missingAttribute(xml, "name");
+        }
+        packageAccesses.put(name, access);
+        if (xml.nextTag() == XMLStreamConstants.START_ELEMENT) {
+            throw unknownElement(xml);
+        }
+    }
+
+    private static Map<String, Package> parsePackagesElement(final XMLStreamReader xml) throws XMLStreamException {
+        Map<String, Package> packages = new HashMap<>();
         for (;;) {
             switch (xml.nextTag()) {
                 case XMLStreamConstants.START_ELEMENT -> {
                     checkNamespace(xml);
                     switch (xml.getLocalName()) {
-                        case "package" -> parsePackageElement(xml, packages, exports, opens);
+                        case "package" -> parsePackageElement(xml, packages);
                         default -> throw unknownElement(xml);
                     }
                 }
                 case XMLStreamConstants.END_ELEMENT -> {
-                    return;
+                    return packages;
                 }
             }
         }
     }
 
-    private static void parsePackageElement(final XMLStreamReader xml, final Set<String> packages, final Set<Export> exports, final Set<Open> opens) throws XMLStreamException {
+    private static void parsePackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
         String name = null;
         boolean exportAll = false;
-        Optional<Set<String>> exportTargets = Optional.empty();
+        Set<String> exportTargets = Set.of();
         boolean openAll = false;
-        Optional<Set<String>> openTargets = Optional.empty();
+        Set<String> openTargets = Set.of();
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
             final String attrVal = xml.getAttributeValue(i);
@@ -456,14 +507,14 @@ public record ModuleDescriptor(
                     if (attrVal.equals("*")) {
                         exportAll = true;
                     } else {
-                        exportTargets = Optional.of(Stream.of(attrVal.split("[,]")).collect(Collectors.toUnmodifiableSet()));
+                        exportTargets = Stream.of(attrVal.split(",")).collect(Collectors.toUnmodifiableSet());
                     }
                 }
                 case "open-to" -> {
                     if (attrVal.equals("*")) {
                         openAll = true;
                     } else {
-                        openTargets = Optional.of(Stream.of(attrVal.split("[,]")).collect(Collectors.toUnmodifiableSet()));
+                        openTargets = Stream.of(attrVal.split(",")).collect(Collectors.toUnmodifiableSet());
                     }
                 }
                 default -> throw unknownAttribute(xml, i);
@@ -472,16 +523,20 @@ public record ModuleDescriptor(
         if (name == null) {
             throw missingAttribute(xml, "name");
         }
-        packages.add(name);
-        if (exportAll) {
-            exports.add(new Export(name));
-        } else if (exportTargets.isPresent()) {
-            exports.add(new Export(name, Modifiers.of(), exportTargets));
-        }
         if (openAll) {
-            opens.add(new Open(name));
-        } else if (openTargets.isPresent()) {
-            opens.add(new Open(name, Modifiers.of(), openTargets));
+            packages.put(name, Package.OPEN);
+        } else if (exportAll) {
+            if (openTargets.isEmpty()) {
+                packages.put(name, Package.EXPORTED);
+            } else {
+                packages.put(name, new Package(PackageAccess.EXPORT, Set.of(), openTargets));
+            }
+        } else {
+            if (exportTargets.isEmpty() && openTargets.isEmpty()) {
+                packages.put(name, Package.PRIVATE);
+            } else {
+                packages.put(name, new Package(PackageAccess.PRIVATE, exportTargets, openTargets));
+            }
         }
         if (xml.nextTag() != XMLStreamConstants.END_ELEMENT) {
             throw unknownElement(xml);
@@ -634,8 +689,8 @@ public record ModuleDescriptor(
         return new XMLStreamException("Unknown attribute \"" + xml.getAttributeName(idx) + "\"", xml.getLocation());
     }
 
-    private static <E, C extends Collection<E>> Optional<C> opt(final C items) {
-        return items.isEmpty() ? Optional.empty() : Optional.of(items);
+    private static XMLStreamException unknownAttributeValue(final XMLStreamReader xml, final int idx) {
+        return new XMLStreamException("Unknown attribute value \"" + xml.getAttributeValue(idx) + "\" for attribute \"" + xml.getAttributeName(idx) + "\"", xml.getLocation());
     }
 
     private static IllegalArgumentException noModuleAttribute() {

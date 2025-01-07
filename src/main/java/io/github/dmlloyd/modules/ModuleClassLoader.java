@@ -40,10 +40,9 @@ import io.github.dmlloyd.classfile.extras.constant.ModuleDesc;
 import io.github.dmlloyd.classfile.extras.constant.PackageDesc;
 import io.github.dmlloyd.classfile.extras.reflect.AccessFlag;
 import io.github.dmlloyd.modules.desc.Dependency;
-import io.github.dmlloyd.modules.desc.Export;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.github.dmlloyd.modules.desc.Open;
+import io.github.dmlloyd.modules.desc.PackageAccess;
 import io.smallrye.common.resource.MemoryResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -99,8 +98,6 @@ public class ModuleClassLoader extends ClassLoader {
         this.linkState = new LinkState.Initial(
             config.dependencies(),
             config.resourceLoaders(),
-            config.exports(),
-            config.opens(),
             config.packages(),
             config.modifiers(),
             config.uses(),
@@ -297,7 +294,7 @@ public class ModuleClassLoader extends ClassLoader {
             return resource;
         }
         String pkgName = Util.resourcePackageName(pathName);
-        if (pkgName.isEmpty() || ! linkDefined().packages().contains(pkgName)) {
+        if (pkgName.isEmpty() || ! linkDefined().packages().containsKey(pkgName)) {
             return resource;
         }
         if (linkDefined().exportedPackages().contains(pkgName)) {
@@ -323,7 +320,7 @@ public class ModuleClassLoader extends ClassLoader {
             return resources;
         }
         String pkgName = Util.resourcePackageName(pathName);
-        if (pkgName.isEmpty() || ! linkDefined().packages().contains(pkgName)) {
+        if (pkgName.isEmpty() || ! linkDefined().packages().containsKey(pkgName)) {
             return resources;
         }
         if (linkDefined().exportedPackages().contains(pkgName)) {
@@ -353,7 +350,7 @@ public class ModuleClassLoader extends ClassLoader {
         }
         LinkState.Packages linked = linkPackages();
         String packageName = Util.packageName(dotName);
-        if (! packageName.isEmpty() && ! linked.packages().contains(packageName)) {
+        if (! packageName.isEmpty() && ! linked.packages().containsKey(packageName)) {
             throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from " + moduleName);
         }
 
@@ -600,14 +597,18 @@ public class ModuleClassLoader extends ClassLoader {
                 builder.version(v);
             } catch (IllegalArgumentException ignored) {
             }
-            builder.packages(linkState.packages());
+            builder.packages(linkState.packages().keySet());
             if (mainClassName != null) {
                 // not actually used, but for completeness...
                 builder.mainClass(mainClassName);
             }
             if (! linkState.modifiers().contains(ModuleDescriptor.Modifier.AUTOMATIC)) {
-                linkState.exports().stream().filter(e -> e.targets().isEmpty()).forEach(e -> builder.exports(e.packageName()));
-                linkState.opens().stream().filter(e -> e.targets().isEmpty()).forEach(e -> builder.opens(e.packageName()));
+                linkState.packages().forEach((name, pkg) -> {
+                    switch (pkg.packageAccess()) {
+                        case EXPORT -> builder.exports(name);
+                        case OPEN -> builder.opens(name);
+                    }
+                });
             }
             descriptor = builder.build();
         }
@@ -620,7 +621,7 @@ public class ModuleClassLoader extends ClassLoader {
             return defined;
         }
         log.debugf("Linking module %s to defined state", moduleName);
-        Set<String> exportedPackages = linkState.exports().stream().filter(e -> e.targets().isEmpty()).map(Export::packageName).collect(Collectors.toUnmodifiableSet());
+        Set<String> exportedPackages = linkState.packages().entrySet().stream().filter(e -> e.getValue().packageAccess().isAtLeast(PackageAccess.EXPORT)).map(Map.Entry::getKey).collect(Collectors.toUnmodifiableSet());
         LinkState.Defined defined;
         if (linkState.modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
             // nothing needed
@@ -669,7 +670,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (visited.add(loaded)) {
             linkState.addReads(loaded.module());
             if (loaded.classLoader() instanceof ModuleClassLoader mcl) {
-                Set<String> packages = mcl.linkInitial().packages();
+                Set<String> packages = mcl.linkInitial().packages().keySet();
                 for (String pkg : packages) {
                     if (mcl.module().isExported(pkg, linkState.module())) {
                         modulesByPackage.putIfAbsent(pkg, mcl.module());
@@ -735,35 +736,47 @@ public class ModuleClassLoader extends ClassLoader {
             }
             Module module = lm.module();
             linkState.addReads(module);
-            // skip java.base for memory efficiency (everyone reads it)
+            // skip boot modules for memory efficiency
             if (! ModuleLayer.boot().modules().contains(module)) {
                 linkExportedPackages(linkState, lm, modulesByPackage, visited);
             }
-        }
-        // and don't forget our own packages
-        for (String pkg : linkState.packages()) {
-            modulesByPackage.put(pkg, linkState.module());
-        }
-        // link up directed exports and opens
-        for (Export export : linkState.exports()) {
-            if (export.targets().isPresent()) {
-                // seek out targets
-                for (String target : export.targets().get()) {
-                    LoadedModule resolved = moduleLoader().doLoadModule(target);
-                    if (resolved != null) {
-                        linkState.addExports(export.packageName(), resolved.module());
+            for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
+                switch (entry.getValue()) {
+                    case EXPORT -> {
+                        if (lm.classLoader() instanceof ModuleClassLoader mcl) {
+                            mcl.linkDefined().addExports(entry.getKey(), module);
+                        } else {
+                            // might not work!
+                            lm.module().addExports(entry.getKey(), module);
+                        }
+                    }
+                    case OPEN -> {
+                        if (lm.classLoader() instanceof ModuleClassLoader mcl) {
+                            mcl.linkDefined().addOpens(entry.getKey(), module);
+                        } else {
+                            // might not work!
+                            lm.module().addOpens(entry.getKey(), module);
+                        }
                     }
                 }
             }
         }
-        for (Open open : linkState.opens()) {
-            if (open.targets().isPresent()) {
-                // seek out targets
-                for (String target : open.targets().get()) {
-                    LoadedModule resolved = moduleLoader().doLoadModule(target);
-                    if (resolved != null) {
-                        linkState.addOpens(open.packageName(), resolved.module());
-                    }
+        // and don't forget our own packages
+        for (String pkg : linkState.packages().keySet()) {
+            modulesByPackage.put(pkg, linkState.module());
+        }
+        // link up directed exports and opens
+        for (Map.Entry<String, io.github.dmlloyd.modules.desc.Package> entry : linkState.packages().entrySet()) {
+            for (String target : entry.getValue().exportTargets()) {
+                LoadedModule resolved = moduleLoader().doLoadModule(target);
+                if (resolved != null) {
+                    linkState.addExports(entry.getKey(), resolved.module());
+                }
+            }
+            for (String target : entry.getValue().openTargets()) {
+                LoadedModule resolved = moduleLoader().doLoadModule(target);
+                if (resolved != null) {
+                    linkState.addOpens(entry.getKey(), resolved.module());
                 }
             }
         }
@@ -891,19 +904,17 @@ public class ModuleClassLoader extends ClassLoader {
                     mab.moduleVersion(moduleVersion);
                     // java.base is always required
                     mab.requires(ModuleDesc.of("java.base"), Set.of(AccessFlag.MANDATED, AccessFlag.SYNTHETIC), null);
-                    // list unqualified exports
-                    linkInitial().exports()
-                        .stream()
-                        .filter(e -> e.targets().isEmpty())
-                        .forEach(e -> mab.exports(PackageDesc.of(e.packageName()), List.of()));
-                    // list unqualified opens
-                    linkInitial().opens()
-                        .stream()
-                        .filter(o -> o.targets().isEmpty())
-                        .forEach(o -> mab.opens(PackageDesc.of(o.packageName()), List.of()));
+                    // list unqualified exports & opens
+                    linkInitial().packages()
+                        .forEach((name, pkg) -> {
+                            switch (pkg.packageAccess()) {
+                                case EXPORT -> mab.exports(PackageDesc.of(name), List.of());
+                                case OPEN -> mab.opens(PackageDesc.of(name), List.of());
+                            }
+                        });
                 }
             ));
-            zb.with(ModulePackagesAttribute.of(linkInitial().packages().stream()
+            zb.with(ModulePackagesAttribute.of(linkInitial().packages().keySet().stream()
                 .map(n -> zb.constantPool().packageEntry(PackageDesc.of(n)))
                 .toList()
             ));
@@ -1081,9 +1092,7 @@ public class ModuleClassLoader extends ClassLoader {
         private final String moduleName;
         private final String moduleVersion;
         private final List<Dependency> dependencies;
-        private final Set<Export> exports;
-        private final Set<Open> opens;
-        private final Set<String> packages;
+        private final Map<String, io.github.dmlloyd.modules.desc.Package> packages;
         private final Modifiers<ModuleDescriptor.Modifier> modifiers;
         private final Set<String> uses;
         private final Map<String, List<String>> provides;
@@ -1097,9 +1106,7 @@ public class ModuleClassLoader extends ClassLoader {
             String moduleName,
             String moduleVersion,
             List<Dependency> dependencies,
-            Set<Export> exports,
-            Set<Open> opens,
-            Set<String> packages,
+            Map<String, io.github.dmlloyd.modules.desc.Package> packages,
             Modifiers<ModuleDescriptor.Modifier> modifiers,
             Set<String> uses,
             Map<String, List<String>> provides,
@@ -1112,8 +1119,6 @@ public class ModuleClassLoader extends ClassLoader {
             this.moduleName = moduleName;
             this.moduleVersion = moduleVersion;
             this.dependencies = dependencies;
-            this.exports = exports;
-            this.opens = opens;
             this.packages = packages;
             this.modifiers = modifiers;
             this.uses = uses;
@@ -1146,15 +1151,7 @@ public class ModuleClassLoader extends ClassLoader {
             return dependencies;
         }
 
-        Set<Export> exports() {
-            return exports;
-        }
-
-        Set<Open> opens() {
-            return opens;
-        }
-
-        Set<String> packages() {
+        Map<String, io.github.dmlloyd.modules.desc.Package> packages() {
             return packages;
         }
 
