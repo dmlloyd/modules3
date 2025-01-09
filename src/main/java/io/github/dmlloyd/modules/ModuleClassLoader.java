@@ -62,7 +62,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private static final Map<String, Module> bootModuleIndex = ModuleLayer.boot().modules().stream()
-        .flatMap(m -> m.getPackages().stream().filter(m::isExported).map(p -> Map.entry(p, m)))
+        .flatMap(m -> m.getPackages().stream().filter(p -> m.isExported(p, Util.myModule)).map(p -> Map.entry(p, m)))
         .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
 
     private final String moduleName;
@@ -168,7 +168,7 @@ public class ModuleClassLoader extends ClassLoader {
                 if (cl instanceof ModuleClassLoader mcl) {
                     loaded = mcl.loadClassDirect(dotName);
                 } else {
-                    loaded = Class.forName(module, dotName);
+                    loaded = Class.forName(dotName, false, cl);
                 }
             } else {
                 throw new ClassNotFoundException("Module " + module.getName() + " does not export package " + packageName + " to " + module().getName());
@@ -650,7 +650,6 @@ public class ModuleClassLoader extends ClassLoader {
             });
             ModuleLayer moduleLayer = ctl.layer();
             Module module = moduleLayer.findModule(moduleName).orElseThrow(IllegalStateException::new);
-            // xxx - for service loading hack
             if (linkState.modifiers().contains(ModuleDescriptor.Modifier.NATIVE_ACCESS)) {
                 Util.enableNativeAccess(ctl, module);
             }
@@ -661,6 +660,7 @@ public class ModuleClassLoader extends ClassLoader {
                 exportedPackages
             );
             defined.addReads(Util.myModule);
+            Util.myModule.addReads(module);
         }
         this.linkState = defined;
         return defined;
