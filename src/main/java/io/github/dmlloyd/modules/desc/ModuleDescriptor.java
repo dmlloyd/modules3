@@ -481,7 +481,9 @@ public record ModuleDescriptor(
                 case XMLStreamConstants.START_ELEMENT -> {
                     checkNamespace(xml);
                     switch (xml.getLocalName()) {
-                        case "package" -> parsePackageElement(xml, packages);
+                        case "private" -> parsePrivatePackageElement(xml, packages);
+                        case "export" -> parseExportPackageElement(xml, packages);
+                        case "open" -> parseOpenPackageElement(xml, packages);
                         default -> throw unknownElement(xml);
                     }
                 }
@@ -492,55 +494,141 @@ public record ModuleDescriptor(
         }
     }
 
-    private static void parsePackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
-        String name = null;
-        boolean exportAll = false;
-        Set<String> exportTargets = Set.of();
-        boolean openAll = false;
-        Set<String> openTargets = Set.of();
+    private static void parsePrivatePackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
+        String pkg = null;
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
             final String attrVal = xml.getAttributeValue(i);
             switch (xml.getAttributeLocalName(i)) {
-                case "name" -> name = attrVal;
-                case "export-to" -> {
-                    if (attrVal.equals("*")) {
-                        exportAll = true;
-                    } else {
-                        exportTargets = Stream.of(attrVal.split(",")).collect(Collectors.toUnmodifiableSet());
-                    }
-                }
-                case "open-to" -> {
-                    if (attrVal.equals("*")) {
-                        openAll = true;
-                    } else {
-                        openTargets = Stream.of(attrVal.split(",")).collect(Collectors.toUnmodifiableSet());
-                    }
-                }
+                case "package" -> pkg = attrVal;
                 default -> throw unknownAttribute(xml, i);
             }
         }
-        if (name == null) {
-            throw missingAttribute(xml, "name");
+        if (pkg == null) {
+            throw missingAttribute(xml, "package");
         }
-        if (openAll) {
-            packages.put(name, Package.OPEN);
-        } else if (exportAll) {
-            if (openTargets.isEmpty()) {
-                packages.put(name, Package.EXPORTED);
-            } else {
-                packages.put(name, new Package(PackageAccess.EXPORT, Set.of(), openTargets));
+        Set<String> exportTargets = Set.of();
+        Set<String> openTargets = Set.of();
+        for (;;) {
+            switch (xml.nextTag()) {
+                case XMLStreamConstants.START_ELEMENT -> {
+                    checkNamespace(xml);
+                    switch (xml.getLocalName()) {
+                        case "export-to" -> {
+                            switch (exportTargets.size()) {
+                                case 0 -> exportTargets = Set.of(parsePackageToElement(xml));
+                                case 1 -> {
+                                    exportTargets = new HashSet<>(exportTargets);
+                                    exportTargets.add(parsePackageToElement(xml));
+                                }
+                                default -> exportTargets.add(parsePackageToElement(xml));
+                            }
+                        }
+                        case "open-to" -> {
+                            switch (openTargets.size()) {
+                                case 0 -> openTargets = Set.of(parsePackageToElement(xml));
+                                case 1 -> {
+                                    openTargets = new HashSet<>(openTargets);
+                                    openTargets.add(parsePackageToElement(xml));
+                                }
+                                default -> openTargets.add(parsePackageToElement(xml));
+                            }
+                        }
+                        default -> throw unknownElement(xml);
+                    }
+                }
+                case XMLStreamConstants.END_ELEMENT -> {
+                    if (exportTargets.isEmpty() && openTargets.isEmpty()) {
+                        packages.put(pkg, Package.PRIVATE);
+                    } else {
+                        packages.put(pkg, new Package(PackageAccess.PRIVATE, exportTargets, openTargets));
+                    }
+                    return;
+                }
             }
-        } else {
-            if (exportTargets.isEmpty() && openTargets.isEmpty()) {
-                packages.put(name, Package.PRIVATE);
-            } else {
-                packages.put(name, new Package(PackageAccess.PRIVATE, exportTargets, openTargets));
+        }
+    }
+
+    private static void parseExportPackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
+        String pkg = null;
+        int cnt = xml.getAttributeCount();
+        for (int i = 0; i < cnt; i ++) {
+            final String attrVal = xml.getAttributeValue(i);
+            switch (xml.getAttributeLocalName(i)) {
+                case "package" -> pkg = attrVal;
+                default -> throw unknownAttribute(xml, i);
             }
+        }
+        if (pkg == null) {
+            throw missingAttribute(xml, "package");
+        }
+        Set<String> openTargets = Set.of();
+        for (;;) {
+            switch (xml.nextTag()) {
+                case XMLStreamConstants.START_ELEMENT -> {
+                    checkNamespace(xml);
+                    switch (xml.getLocalName()) {
+                        case "open-to" -> {
+                            switch (openTargets.size()) {
+                                case 0 -> openTargets = Set.of(parsePackageToElement(xml));
+                                case 1 -> {
+                                    openTargets = new HashSet<>(openTargets);
+                                    openTargets.add(parsePackageToElement(xml));
+                                }
+                                default -> openTargets.add(parsePackageToElement(xml));
+                            }
+                        }
+                        default -> throw unknownElement(xml);
+                    }
+                }
+                case XMLStreamConstants.END_ELEMENT -> {
+                    if (openTargets.isEmpty()) {
+                        packages.put(pkg, Package.EXPORTED);
+                    } else {
+                        packages.put(pkg, new Package(PackageAccess.EXPORT, Set.of(), openTargets));
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    private static void parseOpenPackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
+        String pkg = null;
+        int cnt = xml.getAttributeCount();
+        for (int i = 0; i < cnt; i ++) {
+            final String attrVal = xml.getAttributeValue(i);
+            switch (xml.getAttributeLocalName(i)) {
+                case "package" -> pkg = attrVal;
+                default -> throw unknownAttribute(xml, i);
+            }
+        }
+        if (pkg == null) {
+            throw missingAttribute(xml, "package");
         }
         if (xml.nextTag() != XMLStreamConstants.END_ELEMENT) {
             throw unknownElement(xml);
         }
+        packages.put(pkg, Package.OPEN);
+    }
+
+    private static String parsePackageToElement(final XMLStreamReader xml) throws XMLStreamException {
+        String mod = null;
+        int cnt = xml.getAttributeCount();
+        for (int i = 0; i < cnt; i ++) {
+            final String attrVal = xml.getAttributeValue(i);
+            switch (xml.getAttributeLocalName(i)) {
+                case "module" -> mod = attrVal;
+                default -> throw unknownAttribute(xml, i);
+            }
+        }
+        if (mod == null) {
+            throw missingAttribute(xml, "module");
+        }
+        if (xml.nextTag() != XMLStreamConstants.END_ELEMENT) {
+            throw unknownElement(xml);
+        }
+        return mod;
     }
 
     private static Set<String> parseUsesElement(final XMLStreamReader xml) throws XMLStreamException {
