@@ -1052,18 +1052,23 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     void close() throws IOException {
-        linkLock.lock();
+        if (linkState == LinkState.Closed.INSTANCE) {
+            return;
+        }
+        ReentrantLock lock = linkLock;
         LinkState.Initial init;
+        lock.lock();
         try {
-            LinkState oldState = linkState;
-            if (! (oldState instanceof LinkState.Initial ls)) {
-                return;
-            } else {
-                init = ls;
+            // refresh under lock
+            if (linkState instanceof LinkState.Initial is) {
+                init = is;
                 linkState = LinkState.Closed.INSTANCE;
+            } else {
+                // it must be closed
+                return;
             }
         } finally {
-            linkLock.unlock();
+            lock.unlock();
         }
         IOException ioe = null;
         for (ResourceLoader loader : init.resourceLoaders()) {
