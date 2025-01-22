@@ -579,6 +579,10 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
+    private static final Set<java.lang.module.ModuleDescriptor.Requires.Modifier> justStatic = Set.of(
+        java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC
+    );
+
     private LinkState.Defined linkDefined() {
         LinkState.Initial linkState = linkDependencies();
         if (linkState instanceof LinkState.Defined defined) {
@@ -609,6 +613,7 @@ public class ModuleClassLoader extends ClassLoader {
                         case OPEN -> builder.opens(name);
                     }
                 });
+                linkState.dependencies().forEach(d -> builder.requires(justStatic, d.moduleName()));
             }
             descriptor = builder.build();
         }

@@ -57,6 +57,7 @@
         <plugins>
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
                 <configuration>
                     <argLine>--add-opens java.base/java.lang=io.github.dmlloyd.modules --add-exports java.base/jdk.internal.module=io.github.dmlloyd.modules</argLine>
                 </configuration>
