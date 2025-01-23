@@ -11,6 +11,7 @@ import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.constraint.Assert;
 import io.smallrye.common.resource.ResourceLoader;
+import org.jboss.logging.Logger;
 
 /**
  * A loader for modules.
@@ -28,6 +29,8 @@ import io.smallrye.common.resource.ResourceLoader;
 
  */
 public class ModuleLoader implements Closeable {
+    private static final Logger log = Logger.getLogger("io.github.dmlloyd.modules");
+
     private final String name;
     private final ModuleFinder moduleFinder;
     private final ReentrantLock defineLock = new ReentrantLock();
@@ -230,6 +233,7 @@ public class ModuleLoader implements Closeable {
             } catch (Exception e) {
                 throw new ModuleLoadException("Failed to create module " + moduleName, e);
             }
+            //log.infof("Loaded module %s", moduleName);
             loaders.put(moduleName, loader);
             return loader;
         } finally {

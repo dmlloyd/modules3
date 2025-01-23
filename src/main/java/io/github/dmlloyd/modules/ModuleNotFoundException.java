@@ -5,7 +5,7 @@ import java.io.Serial;
 /**
  * An exception indicating that module was not found.
  */
-public class ModuleNotFoundException extends RuntimeException {
+public class ModuleNotFoundException extends ModuleLoadException {
     @Serial
     private static final long serialVersionUID = 1537142487227363108L;
 
@@ -45,5 +45,11 @@ public class ModuleNotFoundException extends RuntimeException {
      */
     public ModuleNotFoundException(final String msg, final Throwable cause) {
         super(msg, cause);
+    }
+
+    ModuleNotFoundException withMessage(final String newMsg) {
+        ModuleNotFoundException newEx = new ModuleNotFoundException(newMsg);
+        newEx.setStackTrace(getStackTrace());
+        return newEx;
     }
 }

@@ -551,7 +551,11 @@ public class ModuleClassLoader extends ClassLoader {
                 if (d.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
                     return ml.loadModule(d.moduleName());
                 } else {
-                    return ml.requireModule(d.moduleName());
+                    try {
+                        return ml.requireModule(d.moduleName());
+                    } catch (ModuleLoadException e) {
+                        throw e.withMessage(e.getMessage() + " (required by " + moduleName + ")");
+                    }
                 }
             })
             .filter(Objects::nonNull)
