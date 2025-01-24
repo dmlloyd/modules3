@@ -249,7 +249,7 @@ public class ModuleClassLoader extends ClassLoader {
      * {@return the module class loader of the calling class, or {@code null} if the calling class does not have one}
      */
     public static ModuleClassLoader current() {
-        return stackWalker.walk(callerClassLoaderFinder) instanceof ModuleClassLoader mcl ? mcl : null;
+        return stackWalker.getCallerClass().getClassLoader() instanceof ModuleClassLoader mcl ? mcl : null;
     }
 
     /**
@@ -1227,5 +1227,4 @@ public class ModuleClassLoader extends ClassLoader {
     private static final Logger log = Logger.getLogger("io.github.dmlloyd.modules");
     private static final StackWalker stackWalker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
     private static final Function<Stream<StackWalker.StackFrame>, Class<?>> callerFinder = s -> s.map(StackWalker.StackFrame::getDeclaringClass).filter(c -> c.getClassLoader() != null).findFirst().orElse(null);
-    private static final Function<Stream<StackWalker.StackFrame>, ClassLoader> callerClassLoaderFinder = s -> s.map(StackWalker.StackFrame::getDeclaringClass).map(Class::getClassLoader).findFirst().orElse(null);
 }
