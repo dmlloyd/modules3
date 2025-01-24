@@ -116,7 +116,6 @@ abstract class LinkState {
             this.module = module;
             this.layerController = layerController;
             this.exportedPackages = exportedPackages;
-            myModule.addReads(module);
             this.pdCache = pdCache;
         }
 
@@ -127,6 +126,7 @@ abstract class LinkState {
             final Set<String> exportedPackages
         ) {
             this(other, module, layerController, exportedPackages, new ConcurrentHashMap<>());
+            myModule.addReads(module);
         }
 
         Defined(final Defined other) {
