@@ -139,7 +139,7 @@ public class ModuleClassLoader extends ClassLoader {
         }
         String dotName = name.replace('/', '.');
         String packageName = Util.packageName(dotName);
-        if (packageName.isEmpty()) {
+        if (packageName.isEmpty() || linkInitial().packages().containsKey(packageName)) {
             return loadClassDirect(name);
         }
         if (bootModuleIndex.containsKey(packageName)) {
@@ -348,7 +348,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (loaded != null) {
             return loaded;
         }
-        LinkState.Packages linked = linkPackages();
+        LinkState.Defined linked = linkDefined();
         String packageName = Util.packageName(dotName);
         if (! packageName.isEmpty() && ! linked.packages().containsKey(packageName)) {
             throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from " + moduleName);

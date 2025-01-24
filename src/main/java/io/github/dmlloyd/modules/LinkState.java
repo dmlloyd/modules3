@@ -103,6 +103,22 @@ abstract class LinkState {
         private final Module module;
         private final ModuleLayer.Controller layerController;
         private final Set<String> exportedPackages;
+        private final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache;
+
+        private Defined(
+            final Dependencies other,
+            final Module module,
+            final ModuleLayer.Controller layerController,
+            final Set<String> exportedPackages,
+            final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache
+        ) {
+            super(other);
+            this.module = module;
+            this.layerController = layerController;
+            this.exportedPackages = exportedPackages;
+            myModule.addReads(module);
+            this.pdCache = pdCache;
+        }
 
         Defined(
             final Dependencies other,
@@ -110,15 +126,11 @@ abstract class LinkState {
             final ModuleLayer.Controller layerController,
             final Set<String> exportedPackages
         ) {
-            super(other);
-            this.module = module;
-            this.layerController = layerController;
-            this.exportedPackages = exportedPackages;
-            myModule.addReads(module);
+            this(other, module, layerController, exportedPackages, new ConcurrentHashMap<>());
         }
 
         Defined(final Defined other) {
-            this(other, other.module, other.layerController, other.exportedPackages);
+            this(other, other.module, other.layerController, other.exportedPackages, other.pdCache);
         }
 
         Module module() {
@@ -174,29 +186,6 @@ abstract class LinkState {
         Set<String> exportedPackages() {
             return exportedPackages;
         }
-    }
-
-    static class Packages extends Defined {
-        private final Map<String, Module> modulesByPackage;
-        private final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache;
-
-        private Packages(Defined other, Map<String, Module> modulesByPackage, ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache) {
-            super(other);
-            this.modulesByPackage = modulesByPackage;
-            this.pdCache = pdCache;
-        }
-
-        Packages(Defined other, final Map<String, Module> modulesByPackage) {
-            this(other, modulesByPackage, new ConcurrentHashMap<>());
-        }
-
-        Packages(Packages other) {
-            this(other, other.modulesByPackage, other.pdCache);
-        }
-
-        Map<String, Module> modulesByPackage() {
-            return modulesByPackage;
-        }
 
         ProtectionDomain cachedProtectionDomain(final Resource resource) {
             List<CodeSigner> codeSigners = List.copyOf(resource.codeSigners());
@@ -209,6 +198,23 @@ abstract class LinkState {
                 }
             }
             return pd;
+        }
+    }
+
+    static class Packages extends Defined {
+        private final Map<String, Module> modulesByPackage;
+
+        Packages(Defined other, final Map<String, Module> modulesByPackage) {
+            super(other);
+            this.modulesByPackage = modulesByPackage;
+        }
+
+        Packages(Packages other) {
+            this(other, other.modulesByPackage);
+        }
+
+        Map<String, Module> modulesByPackage() {
+            return modulesByPackage;
         }
     }
 
