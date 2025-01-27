@@ -734,7 +734,6 @@ public class ModuleClassLoader extends ClassLoader {
         HashSet<LoadedModule> visited = new HashSet<>();
         HashMap<String, Module> modulesByPackage = new HashMap<>();
         for (Dependency dependency : linkState.dependencies()) {
-            // todo: we're still linking the first row of dependencies twice
             String depName = dependency.moduleName();
             LoadedModule lm = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
             if (lm == null) {
@@ -787,6 +786,13 @@ public class ModuleClassLoader extends ClassLoader {
                 if (resolved != null) {
                     linkState.addOpens(entry.getKey(), resolved.module());
                 }
+            }
+        }
+        // last, register service loader links
+        for (LoadedModule dep : linkState.loadedDependencies()) {
+            ModuleLayer layer = dep.module().getLayer();
+            if (layer != ModuleLayer.boot()) {
+                registerLayer(layer);
             }
         }
         return doLocked(ModuleClassLoader::linkPackagesLocked, modulesByPackage);
@@ -862,7 +868,6 @@ public class ModuleClassLoader extends ClassLoader {
             if (dep.classLoader() instanceof ModuleClassLoader mcl) {
                 mcl.linkProvides();
             }
-            registerLayer(dep.module().getLayer());
         }
         return doLocked(ModuleClassLoader::linkUsesLocked);
     }
