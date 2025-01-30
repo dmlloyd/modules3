@@ -12,9 +12,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
@@ -32,10 +30,6 @@ import io.smallrye.common.resource.ResourceLoader;
  */
 public interface ModuleFinder extends Closeable {
     ModuleDescriptor findModule(String name);
-
-    default List<ModuleDescriptor> eagerLoadableModules() {
-        return List.of();
-    }
 
     default ModuleFinder andThen(ModuleFinder other) {
         if (this == EMPTY) {
@@ -132,7 +126,7 @@ public interface ModuleFinder extends Closeable {
                                         try (InputStream is = resource.openStream()) {
                                             bytes = is.readAllBytes();
                                         }
-                                        return ModuleDescriptor.fromModuleInfo(bytes, () -> defaultPackageFinder(resourceLoaders))
+                                        return ModuleDescriptor.fromModuleInfo(bytes, () -> Util.defaultPackageFinder(resourceLoaders))
                                             .withResourceLoaders(resourceLoaders.stream().map(ResourceLoaderOpener::forLoader).toList());
                                     }
                                 } catch (NoSuchFileException | FileNotFoundException ignored) {
@@ -158,40 +152,6 @@ public interface ModuleFinder extends Closeable {
                 return null;
             }
         };
-    }
-
-
-    private static Set<String> defaultPackageFinder(final List<ResourceLoader> resourceLoaders) {
-        return defaultPackageFinder(resourceLoaders, new HashSet<>());
-    }
-
-    private static Set<String> defaultPackageFinder(List<ResourceLoader> resourceLoaders, HashSet<String> packages) {
-        for (ResourceLoader resourceLoader : resourceLoaders) {
-            try {
-                defaultPackageFinder(resourceLoader.findResource("/"), packages);
-            } catch (IOException e) {
-                throw new ModuleLoadException("Failed to compute package list from " + resourceLoader, e);
-            }
-        }
-        return packages;
-    }
-
-    private static void defaultPackageFinder(Resource directory, HashSet<String> packages) throws IOException {
-        try (DirectoryStream<Resource> ds = directory.openDirectoryStream()) {
-            for (Resource resource : ds) {
-                if (resource.isDirectory()) {
-                    defaultPackageFinder(resource, packages);
-                } else {
-                    String pathName = resource.pathName();
-                    if (pathName.endsWith(".class")) {
-                        int idx = pathName.lastIndexOf('/');
-                        if (idx != -1) {
-                            packages.add(pathName.substring(0, idx).replace('/', '.'));
-                        }
-                    }
-                }
-            }
-        }
     }
 
     interface XMLCloser extends AutoCloseable {

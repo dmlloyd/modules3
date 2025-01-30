@@ -3,6 +3,7 @@ package io.github.dmlloyd.modules;
 import static java.lang.invoke.MethodHandles.lookup;
 import static java.lang.invoke.MethodHandles.privateLookupIn;
 
+import java.io.IOException;
 import java.lang.constant.ClassDesc;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -10,11 +11,17 @@ import java.lang.invoke.MethodType;
 import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReference;
 import java.lang.reflect.UndeclaredThrowableException;
+import java.nio.file.DirectoryStream;
 import java.security.AllPermission;
 import java.security.PermissionCollection;
 import java.security.Permissions;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+
+import io.smallrye.common.resource.Resource;
+import io.smallrye.common.resource.ResourceLoader;
 
 final class Util {
     static final ClassDesc[] NO_DESCS = new ClassDesc[0];
@@ -140,6 +147,39 @@ final class Util {
             throw e;
         } catch (Throwable e) {
             throw new UndeclaredThrowableException(e);
+        }
+    }
+
+    static Set<String> defaultPackageFinder(final List<ResourceLoader> resourceLoaders) {
+        return defaultPackageFinder(resourceLoaders, new HashSet<>());
+    }
+
+    static Set<String> defaultPackageFinder(List<ResourceLoader> resourceLoaders, HashSet<String> packages) {
+        for (ResourceLoader resourceLoader : resourceLoaders) {
+            try {
+                defaultPackageFinder(resourceLoader.findResource("/"), packages);
+            } catch (IOException e) {
+                throw new ModuleLoadException("Failed to compute package list from " + resourceLoader, e);
+            }
+        }
+        return packages;
+    }
+
+    static void defaultPackageFinder(Resource directory, HashSet<String> packages) throws IOException {
+        try (DirectoryStream<Resource> ds = directory.openDirectoryStream()) {
+            for (Resource resource : ds) {
+                if (resource.isDirectory()) {
+                    defaultPackageFinder(resource, packages);
+                } else {
+                    String pathName = resource.pathName();
+                    if (pathName.endsWith(".class")) {
+                        int idx = pathName.lastIndexOf('/');
+                        if (idx != -1) {
+                            packages.add(pathName.substring(0, idx).replace('/', '.'));
+                        }
+                    }
+                }
+            }
         }
     }
 }
