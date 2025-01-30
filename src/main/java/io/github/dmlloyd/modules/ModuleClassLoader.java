@@ -613,7 +613,7 @@ public class ModuleClassLoader extends ClassLoader {
             if (! linkState.modifiers().contains(ModuleDescriptor.Modifier.AUTOMATIC)) {
                 linkState.packages().forEach((name, pkg) -> {
                     switch (pkg.packageAccess()) {
-                        case EXPORT -> builder.exports(name);
+                        case EXPORTED -> builder.exports(name);
                         case OPEN -> builder.opens(name);
                     }
                 });
@@ -630,7 +630,7 @@ public class ModuleClassLoader extends ClassLoader {
             return defined;
         }
         log.debugf("Linking module %s to defined state", moduleName);
-        Set<String> exportedPackages = linkState.packages().entrySet().stream().filter(e -> e.getValue().packageAccess().isAtLeast(PackageAccess.EXPORT)).map(Map.Entry::getKey).collect(Collectors.toUnmodifiableSet());
+        Set<String> exportedPackages = linkState.packages().entrySet().stream().filter(e -> e.getValue().packageAccess().isAtLeast(PackageAccess.EXPORTED)).map(Map.Entry::getKey).collect(Collectors.toUnmodifiableSet());
         LinkState.Defined defined;
         if (linkState.modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
             // nothing needed
@@ -750,7 +750,7 @@ public class ModuleClassLoader extends ClassLoader {
             }
             for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
                 switch (entry.getValue()) {
-                    case EXPORT -> {
+                    case EXPORTED -> {
                         if (lm.classLoader() instanceof ModuleClassLoader mcl) {
                             mcl.linkDefined().addExports(entry.getKey(), module);
                         } else {
@@ -922,7 +922,7 @@ public class ModuleClassLoader extends ClassLoader {
                     linkInitial().packages()
                         .forEach((name, pkg) -> {
                             switch (pkg.packageAccess()) {
-                                case EXPORT -> mab.exports(PackageDesc.of(name), List.of());
+                                case EXPORTED -> mab.exports(PackageDesc.of(name), List.of());
                                 case OPEN -> mab.opens(PackageDesc.of(name), List.of());
                             }
                         });

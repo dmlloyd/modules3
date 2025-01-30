@@ -209,7 +209,7 @@ public record ModuleDescriptor(
                     if (oldVal == null) {
                         return Package.EXPORTED;
                     } else if (oldVal.packageAccess() == PackageAccess.PRIVATE) {
-                        return new Package(PackageAccess.EXPORT, Set.of(), oldVal.openTargets());
+                        return new Package(PackageAccess.EXPORTED, Set.of(), oldVal.openTargets());
                     } else {
                         // already exported (opened actually)
                         return oldVal;
@@ -452,13 +452,13 @@ public record ModuleDescriptor(
 
     private static void parseAccessElement(final XMLStreamReader xml, final Map<String, PackageAccess> packageAccesses) throws XMLStreamException {
         String name = null;
-        PackageAccess access = PackageAccess.EXPORT;
+        PackageAccess access = PackageAccess.EXPORTED;
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
             switch (xml.getAttributeLocalName(i)) {
                 case "name" -> name = xml.getAttributeValue(i);
                 case "level" -> access = switch (xml.getAttributeValue(i)) {
-                    case "export" -> PackageAccess.EXPORT;
+                    case "export" -> PackageAccess.EXPORTED;
                     case "open" -> PackageAccess.OPEN;
                     default -> throw unknownAttributeValue(xml, i);
                 };
@@ -585,7 +585,7 @@ public record ModuleDescriptor(
                     if (openTargets.isEmpty()) {
                         packages.put(pkg, Package.EXPORTED);
                     } else {
-                        packages.put(pkg, new Package(PackageAccess.EXPORT, Set.of(), openTargets));
+                        packages.put(pkg, new Package(PackageAccess.EXPORTED, Set.of(), openTargets));
                     }
                     return;
                 }

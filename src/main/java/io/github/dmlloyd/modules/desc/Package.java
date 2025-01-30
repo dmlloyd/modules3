@@ -19,11 +19,11 @@ public record Package(
 
     public Package {
         Assert.checkNotNullParam("packageAccess", packageAccess);
-        exportTargets = packageAccess.isAtLeast(PackageAccess.EXPORT) ? Set.of() : Set.copyOf(exportTargets);
+        exportTargets = packageAccess.isAtLeast(PackageAccess.EXPORTED) ? Set.of() : Set.copyOf(exportTargets);
         openTargets = packageAccess.isAtLeast(PackageAccess.OPEN) ? Set.of() : Set.copyOf(openTargets);
     }
 
     public static final Package PRIVATE = new Package(PackageAccess.PRIVATE, Set.of(), Set.of());
-    public static final Package EXPORTED = new Package(PackageAccess.EXPORT, Set.of(), Set.of());
+    public static final Package EXPORTED = new Package(PackageAccess.EXPORTED, Set.of(), Set.of());
     public static final Package OPEN = new Package(PackageAccess.OPEN, Set.of(), Set.of());
 }
