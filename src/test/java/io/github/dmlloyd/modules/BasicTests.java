@@ -14,7 +14,8 @@ import java.util.random.RandomGenerator;
 import io.github.dmlloyd.modules.desc.Dependency;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.github.dmlloyd.modules.desc.Package;
+import io.github.dmlloyd.modules.desc.PackageInfo;
+import io.smallrye.common.resource.MemoryResource;
 import org.junit.jupiter.api.Test;
 
 public final class BasicTests {
@@ -26,11 +27,9 @@ public final class BasicTests {
                 return name.equals("hello") ? new ModuleDescriptor(
                     "hello",
                     Optional.of("1.2.3"),
-                    Optional.of("test"),
                     Modifiers.of(),
+                    Optional.of("test"),
                     Optional.empty(),
-                    Optional.empty(),
-                    ModuleClassLoader::new,
                     List.of(
                         new Dependency(
                             "java.base",
@@ -40,8 +39,7 @@ public final class BasicTests {
                     ),
                     Set.of(RandomGenerator.class.getName(), "java.lang.Unknown"),
                     Map.of("java.lang.Nothing", List.of("test.foobar.NonExistent")),
-                    List.of(),
-                    Map.of("test.foobar", Package.EXPORTED, "test.foobar.impl", Package.PRIVATE)
+                    Map.of("test.foobar", PackageInfo.EXPORTED, "test.foobar.impl", PackageInfo.PRIVATE)
                 ) : null;
             }
         }, ModuleLoader.BOOT);
@@ -60,7 +58,8 @@ public final class BasicTests {
         try (mi) {
             bytes = mi.readAllBytes();
         }
-        ModuleDescriptor desc = ModuleDescriptor.fromModuleInfo(bytes, myMod::getPackages);
+        MemoryResource resource = new MemoryResource("module-info.class", bytes);
+        ModuleDescriptor desc = ModuleDescriptor.fromModuleInfo(resource, List.of());
         assertEquals(myMod.getName(), desc.name());
     }
 }

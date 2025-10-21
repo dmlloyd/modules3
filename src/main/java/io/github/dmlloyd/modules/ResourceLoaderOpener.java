@@ -1,8 +1,14 @@
-package io.github.dmlloyd.modules.desc;
+package io.github.dmlloyd.modules;
 
 import java.io.IOException;
+import java.net.URL;
+import java.nio.file.Path;
 
+import io.smallrye.common.resource.JarFileResourceLoader;
+import io.smallrye.common.resource.PathResourceLoader;
+import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
+import io.smallrye.common.resource.URLResourceLoader;
 
 /**
  * An opener for a resource loader.
@@ -27,5 +33,21 @@ public interface ResourceLoaderOpener {
      */
     static ResourceLoaderOpener forLoader(ResourceLoader loader) {
         return () -> loader;
+    }
+
+    static ResourceLoaderOpener forDirectory(Path path) {
+        return () -> new PathResourceLoader(path);
+    }
+
+    static ResourceLoaderOpener forJarFile(Path jarPath) {
+        return () -> new JarFileResourceLoader(jarPath);
+    }
+
+    static ResourceLoaderOpener forJarResource(Resource jarResource) {
+        return () -> new JarFileResourceLoader(jarResource);
+    }
+
+    static ResourceLoaderOpener forURL(URL url) {
+        return () -> new URLResourceLoader(url);
     }
 }

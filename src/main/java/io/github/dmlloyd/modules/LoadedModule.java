@@ -1,5 +1,7 @@
 package io.github.dmlloyd.modules;
 
+import java.util.Optional;
+
 import io.smallrye.common.constraint.Assert;
 
 /**
@@ -8,7 +10,7 @@ import io.smallrye.common.constraint.Assert;
  * and have no defined identity semantics.
  * Usage as a hash key in particular is not supported.
  */
-public abstract class LoadedModule {
+public sealed abstract class LoadedModule {
     private LoadedModule() {}
 
     /**
@@ -30,6 +32,11 @@ public abstract class LoadedModule {
      */
     public abstract ClassLoader classLoader() throws ModuleLoadException;
 
+    /**
+     * {@return the optional name of the module}
+     */
+    public abstract Optional<String> name();
+
     public boolean equals(final Object obj) {
         return obj instanceof LoadedModule lm && equals(lm);
     }
@@ -43,31 +50,14 @@ public abstract class LoadedModule {
      * @param module the module to encapsulate (must not be {@code null})
      */
     public static LoadedModule forModule(Module module) {
-        ClassLoader cl = module.getClassLoader();
-        if (cl instanceof ModuleClassLoader mcl) {
-            return forModuleClassLoader(mcl);
+        Assert.checkNotNullParam("module", module);
+        if (module.getClassLoader() instanceof ModuleClassLoader mcl) {
+            // this will be false if mcl defines a named module but module is unnamed
+            if (module.isNamed() || mcl.module() == module) {
+                return forModuleClassLoader(mcl);
+            }
         }
-        return new LoadedModule() {
-            public Module module() throws ModuleLoadException {
-                return module;
-            }
-
-            public ClassLoader classLoader() throws ModuleLoadException {
-                return module.getClassLoader();
-            }
-
-            public boolean equals(final LoadedModule other) {
-                return other != null && other.getClass() == getClass() && module.equals(other.module());
-            }
-
-            public int hashCode() {
-                return module.hashCode();
-            }
-
-            public String toString() {
-                return "Loaded[" + module() + "]";
-            }
-        };
+        return new External(module);
     }
 
     /**
@@ -75,27 +65,70 @@ public abstract class LoadedModule {
      * @param cl the class loader of the module to encapsulate (must not be {@code null})
      */
     public static LoadedModule forModuleClassLoader(ModuleClassLoader cl) {
-        Assert.checkNotNullParam("cl", cl);
-        return new LoadedModule() {
-            public Module module() throws ModuleLoadException {
-                return cl.module();
-            }
+        return new Internal(Assert.checkNotNullParam("cl", cl));
+    }
 
-            public ModuleClassLoader classLoader() {
-                return cl;
-            }
+    static final class Internal extends LoadedModule {
+        private final ModuleClassLoader cl;
 
-            public boolean equals(final LoadedModule other) {
-                return other != null && other.getClass() == getClass() && cl.equals(other.classLoader());
-            }
+        public Internal(final ModuleClassLoader cl) {
+            this.cl = cl;
+        }
 
-            public int hashCode() {
-                return cl.hashCode();
-            }
+        public Module module() throws ModuleLoadException {
+            return cl.module();
+        }
 
-            public String toString() {
-                return "Loaded[" + classLoader() + "]";
-            }
-        };
+        public Optional<String> name() {
+            return Optional.of(cl.moduleName());
+        }
+
+        public ModuleClassLoader classLoader() {
+            return cl;
+        }
+
+        public boolean equals(final LoadedModule other) {
+            return other != null && other.getClass() == getClass() && cl.equals(other.classLoader());
+        }
+
+        public int hashCode() {
+            return cl.hashCode();
+        }
+
+        public String toString() {
+            return "Loaded[" + classLoader() + "]";
+        }
+    }
+
+    private static final class External extends LoadedModule {
+        private final Module module;
+
+        public External(final Module module) {
+            this.module = module;
+        }
+
+        public Module module() throws ModuleLoadException {
+            return module;
+        }
+
+        public Optional<String> name() {
+            return module.isNamed() ? Optional.of(module.getName()) : Optional.empty();
+        }
+
+        public ClassLoader classLoader() throws ModuleLoadException {
+            return module.getClassLoader();
+        }
+
+        public boolean equals(final LoadedModule other) {
+            return other != null && other.getClass() == getClass() && module.equals(other.module());
+        }
+
+        public int hashCode() {
+            return module.hashCode();
+        }
+
+        public String toString() {
+            return "Loaded[" + module() + "]";
+        }
     }
 }

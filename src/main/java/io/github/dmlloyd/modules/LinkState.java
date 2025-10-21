@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import io.github.dmlloyd.modules.desc.Dependency;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.github.dmlloyd.modules.desc.Package;
+import io.github.dmlloyd.modules.desc.PackageInfo;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
 
@@ -24,22 +24,29 @@ import io.smallrye.common.resource.ResourceLoader;
 abstract class LinkState {
     private LinkState() {}
 
+    /**
+     * The singleton closed state.
+     */
     static final class Closed extends LinkState {
         private Closed() {}
 
         static final Closed INSTANCE = new Closed();
     }
 
-    static class Initial extends LinkState {
+    static class Loaded extends LinkState {
+        private final String moduleVersion;
+        private final String mainClass;
         private final List<Dependency> dependencies;
         private final List<ResourceLoader> resourceLoaders;
-        private final Map<String, Package> packages;
+        private final Map<String, PackageInfo> packages;
         private final Modifiers<ModuleDescriptor.Modifier> modifiers;
         private final Set<String> uses;
         private final Map<String, List<String>> provides;
         private final URI location;
 
-        Initial(final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Map<String, Package> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Map<String, List<String>> provides, final URI location) {
+        Loaded(final String moduleVersion, final String mainClass, final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Map<String, PackageInfo> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Map<String, List<String>> provides, final URI location) {
+            this.moduleVersion = moduleVersion;
+            this.mainClass = mainClass;
             this.dependencies = dependencies;
             this.resourceLoaders = resourceLoaders;
             this.packages = packages;
@@ -49,8 +56,8 @@ abstract class LinkState {
             this.location = location;
         }
 
-        Initial(final Initial other) {
-            this(other.dependencies, other.resourceLoaders, other.packages, other.modifiers, other.uses, other.provides, other.location);
+        Loaded(final Loaded other) {
+            this(other.moduleVersion, other.mainClass, other.dependencies, other.resourceLoaders, other.packages, other.modifiers, other.uses, other.provides, other.location);
         }
 
         List<Dependency> dependencies() {
@@ -61,7 +68,7 @@ abstract class LinkState {
             return resourceLoaders;
         }
 
-        Map<String, Package> packages() {
+        Map<String, PackageInfo> packages() {
             return packages;
         }
 
@@ -82,10 +89,10 @@ abstract class LinkState {
         }
     }
 
-    static class Dependencies extends Initial {
+    static class Dependencies extends Loaded {
         private final List<LoadedModule> loadedDependencies;
 
-        Dependencies(final Initial other, final List<LoadedModule> loadedDependencies) {
+        Dependencies(final Loaded other, final List<LoadedModule> loadedDependencies) {
             super(other);
             this.loadedDependencies = loadedDependencies;
         }
@@ -135,10 +142,6 @@ abstract class LinkState {
 
         Module module() {
             return module;
-        }
-
-        ModuleLayer layer() {
-            return module().getLayer();
         }
 
         void addReads(final Module target) {
@@ -191,7 +194,7 @@ abstract class LinkState {
             List<CodeSigner> codeSigners = List.copyOf(resource.codeSigners());
             ProtectionDomain pd = pdCache.get(codeSigners);
             if (pd == null) {
-                pd = new ProtectionDomain(new CodeSource(resource.url(), codeSigners.toArray(CodeSigner[]::new)), ALL_PERMISSIONS);
+                pd = new ProtectionDomain(new CodeSource(resource.url(), codeSigners.toArray(CodeSigner[]::new)), allPermissions);
                 ProtectionDomain appearing = pdCache.putIfAbsent(codeSigners, pd);
                 if (appearing != null) {
                     pd = appearing;

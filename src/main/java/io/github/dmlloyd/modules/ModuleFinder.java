@@ -4,7 +4,6 @@ import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -19,7 +18,6 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.github.dmlloyd.modules.desc.ResourceLoaderOpener;
 import io.smallrye.common.resource.JarFileResourceLoader;
 import io.smallrye.common.resource.PathResource;
 import io.smallrye.common.resource.Resource;
@@ -50,6 +48,9 @@ public interface ModuleFinder extends Closeable {
         return new ModuleFinder() {
 
             public ModuleDescriptor findModule(final String name) {
+                interface XMLCloser extends AutoCloseable {
+                    void close() throws XMLStreamException;
+                }
                 for (Path realPath : paths) {
                     int idx = 0;
                     int dot = name.indexOf('.');
@@ -66,7 +67,7 @@ public interface ModuleFinder extends Closeable {
                     Path moduleXml = null;
                     try (DirectoryStream<Path> ds = Files.newDirectoryStream(realPath)) {
                         for (Path subPath : ds) {
-                            if (subPath.getFileName().toString().equals("module.xml") && Files.isRegularFile(subPath)) {
+                            if (subPath.endsWith("module.xml") && Files.isRegularFile(subPath)) {
                                 moduleXml = subPath;
                             } else if (subPath.getFileName().toString().endsWith(".jar") && Files.isRegularFile(subPath)) {
                                 if (items == null) {
@@ -97,7 +98,6 @@ public interface ModuleFinder extends Closeable {
                         List<ResourceLoader> resourceLoaders = new ArrayList<>(items.size());
                         try {
                             for (Path item : items) {
-                                // todo - temp workaround for https://github.com/smallrye/smallrye-common/pull/378
                                 PathResource pr = new PathResource(item.toString(), item);
                                 try {
                                     resourceLoaders.add(new JarFileResourceLoader(pr));
@@ -110,8 +110,7 @@ public interface ModuleFinder extends Closeable {
                                 try (BufferedReader br = Files.newBufferedReader(moduleXml, StandardCharsets.UTF_8)) {
                                     XMLStreamReader xml = XMLInputFactory.newDefaultFactory().createXMLStreamReader(br);
                                     try (XMLCloser ignored = xml::close) {
-                                        return ModuleDescriptor.fromXml(xml)
-                                            .withResourceLoaders(resourceLoaders.stream().map(ResourceLoaderOpener::forLoader).toList());
+                                        return ModuleDescriptor.fromXml(xml);
                                     }
                                 } catch (XMLStreamException | IOException e) {
                                     throw new ModuleLoadException("Failed to read " + moduleXml, e);
@@ -122,12 +121,7 @@ public interface ModuleFinder extends Closeable {
                                 try {
                                     resource = resourceLoader.findResource("module-info.class");
                                     if (resource != null) {
-                                        byte[] bytes;
-                                        try (InputStream is = resource.openStream()) {
-                                            bytes = is.readAllBytes();
-                                        }
-                                        return ModuleDescriptor.fromModuleInfo(bytes, () -> Util.defaultPackageFinder(resourceLoaders))
-                                            .withResourceLoaders(resourceLoaders.stream().map(ResourceLoaderOpener::forLoader).toList());
+                                        return ModuleDescriptor.fromModuleInfo(resource, resourceLoaders);
                                     }
                                 } catch (NoSuchFileException | FileNotFoundException ignored) {
                                     // just try the next one
@@ -152,9 +146,5 @@ public interface ModuleFinder extends Closeable {
                 return null;
             }
         };
-    }
-
-    interface XMLCloser extends AutoCloseable {
-        void close() throws XMLStreamException;
     }
 }

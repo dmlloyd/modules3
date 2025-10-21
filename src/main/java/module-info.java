@@ -6,8 +6,8 @@ module io.github.dmlloyd.modules {
 
     requires io.github.dmlloyd.classfile;
     requires io.smallrye.common.constraint;
-    requires io.smallrye.common.resource;
-    requires java.xml;
+    requires transitive io.smallrye.common.resource;
+    requires transitive java.xml;
     requires java.logging;
 
     // todo: only do this on packaging

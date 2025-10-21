@@ -52,8 +52,60 @@ public record Dependency(
         this(moduleName, Modifiers.of(modifier), Optional.empty());
     }
 
+    /**
+     * {@return {@code true} if the dependency is synthetic}
+     */
+    public boolean isSynthetic() {
+        return modifiers.contains(Modifier.SYNTHETIC);
+    }
+
+    /**
+     * {@return {@code true} if the dependency is <em>not</em> synthetic}
+     */
     public boolean isNonSynthetic() {
         return ! modifiers.contains(Modifier.SYNTHETIC);
+    }
+
+    /**
+     * {@return {@code true} if the dependency is mandated}
+     */
+    public boolean isMandated() {
+        return modifiers.contains(Modifier.MANDATED);
+    }
+
+    /**
+     * {@return {@code true} if the dependency is <em>not</em> mandated}
+     */
+    public boolean isNonMandated() {
+        return ! modifiers.contains(Modifier.MANDATED);
+    }
+
+    /**
+     * {@return {@code true} if the dependency is optional}
+     */
+    public boolean isOptional() {
+        return modifiers.contains(Modifier.OPTIONAL);
+    }
+
+    /**
+     * {@return {@code true} if the dependency is <em>not</em> optional}
+     */
+    public boolean isNonOptional() {
+        return ! modifiers.contains(Modifier.OPTIONAL);
+    }
+
+    /**
+     * {@return {@code true} if the dependency is transitive}
+     */
+    public boolean isTransitive() {
+        return modifiers.contains(Modifier.TRANSITIVE);
+    }
+
+    /**
+     * {@return {@code true} if the dependency is <em>not</em> transitive}
+     */
+    public boolean isNonTransitive() {
+        return ! modifiers.contains(Modifier.TRANSITIVE);
     }
 
     /**
@@ -68,4 +120,9 @@ public record Dependency(
 
         public static final List<Modifier> values = List.of(values());
     }
+
+    /**
+     * The standard {@code java.base} dependency, for convenience.
+     */
+    public static final Dependency JAVA_BASE = new Dependency("java.base", Modifiers.of(Modifier.SYNTHETIC, Modifier.MANDATED), Optional.empty(), Map.of());
 }

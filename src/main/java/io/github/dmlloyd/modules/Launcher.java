@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 
 import io.github.dmlloyd.modules.desc.Dependency;
 import io.smallrye.common.constraint.Assert;
+import io.smallrye.common.resource.JarFileResourceLoader;
 
 /**
  * The main entry point to bootstrap a basic modular environment.
@@ -35,8 +36,25 @@ public final class Launcher implements Runnable {
     }
 
     public void run() {
-        ModuleFinder finder = ModuleFinder.fromFileSystem(configuration.modulePath());
-        ModuleLoader loader = new DelegatingModuleLoader("app", finder, ModuleLoader.forLayer("boot", Util.myLayer), configuration.implied());
+        ModuleLoader myLayerLoader = ModuleLoader.forLayer("init", Util.myLayer);
+        // todo:
+        //  - make each dependency select its module loader based on where it comes from
+        //  - find a better way to delegate between loaders
+        // XXX
+        ModuleLoader loader = new ModuleLoader("init") {
+            public LoadedModule loadModule(final String moduleName) {
+                LoadedModule loaded = super.loadModule(moduleName);
+                if (loaded != null) {
+                    return loaded;
+                }
+                Module module = Util.myLayerModules.get(moduleName);
+                if (module != null) {
+                    return LoadedModule.forModule(module);
+                }
+                return null;
+            }
+        };
+        // todo: implied
         String launchName = configuration.launchName();
         Module bootModule;
         String mainClassName;
@@ -45,7 +63,18 @@ public final class Launcher implements Runnable {
             case JAR -> {
                 JarFileModuleFinder jarFinder;
                 try {
-                    jarFinder = new JarFileModuleFinder(Path.of(launchName));
+                    Path launchPath = Path.of(launchName);
+                    JarFileResourceLoader rl = new JarFileResourceLoader(launchPath);
+                    try {
+                        jarFinder = new JarFileModuleFinder(rl, launchPath.getFileName().toString());
+                    } catch (Throwable t) {
+                        try {
+                            rl.close();
+                        } catch (Throwable t2) {
+                            t.addSuppressed(t2);
+                        }
+                        throw t;
+                    }
                 } catch (IOException e) {
                     throw new ModuleLoadException("Failed to open boot module JAR \"" + launchName + "\"", e);
                 }

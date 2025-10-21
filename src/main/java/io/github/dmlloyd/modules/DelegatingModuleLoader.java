@@ -1,6 +1,5 @@
 package io.github.dmlloyd.modules;
 
-import java.util.List;
 import java.util.function.Function;
 
 import io.smallrye.common.constraint.Assert;
@@ -19,7 +18,7 @@ public final class DelegatingModuleLoader extends ModuleLoader {
      * @param delegateFn the function which yields the delegate to use when the module is not found (must not be {@code null})
      */
     public DelegatingModuleLoader(final String name, final ModuleFinder moduleFinder, final Function<String, ModuleLoader> delegateFn) {
-        super(name, moduleFinder);
+        super(name);
         this.delegateFn = Assert.checkNotNullParam("delegateFn", delegateFn);
     }
 
@@ -35,23 +34,16 @@ public final class DelegatingModuleLoader extends ModuleLoader {
         Assert.checkNotNullParam("delegate", delegate);
     }
 
-    DelegatingModuleLoader(final String app, final ModuleFinder finder, final ModuleLoader delegate, final List<String> implied) {
-        super(app, finder, implied);
-        delegateFn = __ -> delegate;
-    }
-
-    protected LoadedModule doLoadModule(final String moduleName) {
-        LoadedModule module;
-        ModuleClassLoader loader = findModuleLocal(moduleName);
-        if (loader == null) {
+    protected ModuleClassLoader findModule(final String moduleName) {
+        ModuleClassLoader loader = findDefinedModule(moduleName);
+        if (loader != null) {
+            return loader;
+        } else {
             ModuleLoader delegate = delegateFn.apply(moduleName);
             if (delegate == null) {
                 return null;
             }
-            module = delegate.loadModule(moduleName);
-        } else {
-            module = LoadedModule.forModuleClassLoader(loader);
+            return delegate.findModule(moduleName);
         }
-        return module;
     }
 }

@@ -3,82 +3,68 @@ package io.github.dmlloyd.modules;
 import static java.lang.invoke.MethodHandles.lookup;
 import static java.lang.invoke.MethodHandles.privateLookupIn;
 
-import java.io.IOException;
-import java.lang.constant.ClassDesc;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReference;
 import java.lang.reflect.UndeclaredThrowableException;
-import java.nio.file.DirectoryStream;
 import java.security.AllPermission;
 import java.security.PermissionCollection;
-import java.security.Permissions;
-import java.util.HashSet;
-import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
-import io.smallrye.common.resource.Resource;
-import io.smallrye.common.resource.ResourceLoader;
+import jdk.internal.module.Modules;
+
+import io.github.dmlloyd.modules.impl.TextIter;
 
 final class Util {
-    static final ClassDesc[] NO_DESCS = new ClassDesc[0];
-    static final PermissionCollection EMPTY_PERMISSIONS;
-    static final PermissionCollection ALL_PERMISSIONS;
+    static final PermissionCollection emptyPermissions;
+    static final PermissionCollection allPermissions;
     static final Module myModule = Util.class.getModule();
     static final ModuleLayer myLayer = myModule.getLayer();
-    private static final MethodHandle implAddUses;
-    private static final MethodHandle addProvides;
+    static final Map<String, Module> myLayerModules = myLayer.modules().stream().collect(Collectors.toUnmodifiableMap(
+        Module::getName,
+        Function.identity()
+    ));
+    // ↓↓↓↓↓↓↓ private ↓↓↓↓↓↓↓
     private static final MethodHandle enableNativeAccess;
     private static final MethodHandle moduleLayerBindToLoader;
 
     static {
-        Permissions emptyPermissions = new Permissions();
-        emptyPermissions.setReadOnly();
-        EMPTY_PERMISSIONS = emptyPermissions;
+        // initialize permission collections
         AllPermission all = new AllPermission();
-        PermissionCollection allPermissions = all.newPermissionCollection();
-        allPermissions.add(all);
-        allPermissions.setReadOnly();
-        ALL_PERMISSIONS = allPermissions;
-    }
-
-    static {
+        PermissionCollection epc = all.newPermissionCollection();
+        epc.setReadOnly();
+        emptyPermissions = epc;
+        PermissionCollection apc = all.newPermissionCollection();
+        apc.add(all);
+        apc.setReadOnly();
+        allPermissions = apc;
+        // initialize method handles
         try {
+            Modules.addOpens(Object.class.getModule(), "java.lang", myModule);
             MethodHandles.Lookup lookup = privateLookupIn(Module.class, lookup());
-            implAddUses = lookup.findVirtual(Module.class, "implAddUses", MethodType.methodType(void.class, Class.class));
-            @SuppressWarnings("Java9ReflectionClassVisibility")
-            Class<?> modules = Class.forName("jdk.internal.module.Modules", false, null);
-            addProvides = lookup.findStatic(modules, "addProvides", MethodType.methodType(void.class, Module.class, Class.class, Class.class));
             moduleLayerBindToLoader = lookup.findVirtual(ModuleLayer.class, "bindToLoader", MethodType.methodType(void.class, ClassLoader.class)).asType(MethodType.methodType(void.class, ModuleLayer.class, ModuleClassLoader.class));
-        } catch (ClassNotFoundException e) {
-            NoClassDefFoundError error = new NoClassDefFoundError(e.getMessage());
-            error.setStackTrace(e.getStackTrace());
-            throw error;
         } catch (NoSuchMethodException e) {
-            NoSuchMethodError error = new NoSuchMethodError(e.getMessage());
-            error.setStackTrace(e.getStackTrace());
-            throw error;
+            throw toError(e);
         } catch (IllegalAccessException e) {
-            IllegalAccessError error = new IllegalAccessError(e.getMessage() + " -- use: --add-opens java.base/java.lang=" + myModule.getName() + " --add-exports java.base/jdk.internal.module=" + myModule.getName());
+            IllegalAccessError error = new IllegalAccessError(e.getMessage() + " -- use: --add-exports java.base/jdk.internal.module=" + myModule.getName());
             error.setStackTrace(e.getStackTrace());
             throw error;
         }
-    }
-
-    static {
         MethodType methodType = MethodType.methodType(
             ModuleLayer.Controller.class,
             Module.class
         );
-        MethodHandle h = null;
+        // this one is flexible: it's only since Java 22 (otherwise, ignore)
+        MethodHandle h;
         try {
-            h = lookup().findVirtual(ModuleLayer.Controller.class, "enableNativeAccess", methodType);
+            h = privateLookupIn(ModuleLayer.Controller.class, lookup()).findVirtual(ModuleLayer.Controller.class, "enableNativeAccess", methodType);
         } catch (NoSuchMethodException | IllegalAccessException ignored) {
-        }
-        if (h == null) {
             h = MethodHandles.empty(methodType);
         }
         enableNativeAccess = h;
@@ -107,23 +93,19 @@ final class Util {
     };
 
     static void addUses(Module module, Class<?> type) {
-        try {
-            implAddUses.invokeExact(module, type);
-        } catch (RuntimeException | Error e) {
-            throw e;
-        } catch (Throwable e) {
-            throw new UndeclaredThrowableException(e);
-        }
+        Modules.addUses(module, type);
     }
 
     static void addProvides(Module m, Class<?> service, Class<?> impl) {
-        try {
-            addProvides.invokeExact(m, service, impl);
-        } catch (RuntimeException | Error e) {
-            throw e;
-        } catch (Throwable e) {
-            throw new UndeclaredThrowableException(e);
-        }
+        Modules.addProvides(m, service, impl);
+    }
+
+    static void addExports(Module fromModule, String packageName, Module toModule) {
+        Modules.addExports(fromModule, packageName, toModule);
+    }
+
+    static void addOpens(Module fromModule, String packageName, Module toModule) {
+        Modules.addOpens(fromModule, packageName, toModule);
     }
 
     static void enableNativeAccess(final ModuleLayer.Controller ctl, final Module module) {
@@ -150,37 +132,36 @@ final class Util {
         }
     }
 
-    static Set<String> defaultPackageFinder(final List<ResourceLoader> resourceLoaders) {
-        return defaultPackageFinder(resourceLoaders, new HashSet<>());
-    }
-
-    static Set<String> defaultPackageFinder(List<ResourceLoader> resourceLoaders, HashSet<String> packages) {
-        for (ResourceLoader resourceLoader : resourceLoaders) {
-            try {
-                defaultPackageFinder(resourceLoader.findResource("/"), packages);
-            } catch (IOException e) {
-                throw new ModuleLoadException("Failed to compute package list from " + resourceLoader, e);
-            }
-        }
-        return packages;
-    }
-
-    static void defaultPackageFinder(Resource directory, HashSet<String> packages) throws IOException {
-        try (DirectoryStream<Resource> ds = directory.openDirectoryStream()) {
-            for (Resource resource : ds) {
-                if (resource.isDirectory()) {
-                    defaultPackageFinder(resource, packages);
-                } else {
-                    String pathName = resource.pathName();
-                    if (pathName.endsWith(".class")) {
-                        int idx = pathName.lastIndexOf('/');
-                        if (idx != -1) {
-                            packages.add(pathName.substring(0, idx).replace('/', '.'));
-                        }
-                    }
+    static String autoModuleName(TextIter iter) {
+        StringBuilder sb = new StringBuilder(iter.text().length());
+        boolean dot = false;
+        while (iter.hasNext()) {
+            // parse each "word"; the first numeric is a version
+            if (Character.isLetter(iter.peekNext())) {
+                dot = false;
+                do {
+                    sb.appendCodePoint(iter.next());
+                } while (iter.hasNext() && Character.isLetterOrDigit(iter.peekNext()));
+            } else if (Character.isDigit(iter.peekNext())) {
+                if (dot) {
+                    // delete dot from string
+                    sb.setLength(sb.length() - 1);
                 }
+                // version starts here
+                return sb.toString();
+            } else if (! dot) {
+                dot = true;
+                sb.append('.');
             }
         }
+        // no version
+        return sb.toString();
+    }
+
+    static NoSuchMethodError toError(NoSuchMethodException e) {
+        var error = new NoSuchMethodError(e.getMessage());
+        error.setStackTrace(e.getStackTrace());
+        return error;
     }
 }
 

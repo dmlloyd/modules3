@@ -3,7 +3,6 @@ package io.github.dmlloyd.modules;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.lang.constant.ClassDesc;
 import java.lang.module.Configuration;
 import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReader;
@@ -26,7 +25,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 import java.util.stream.Collectors;
@@ -43,6 +41,7 @@ import io.github.dmlloyd.modules.desc.Dependency;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageAccess;
+import io.github.dmlloyd.modules.desc.PackageInfo;
 import io.smallrye.common.resource.MemoryResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -52,9 +51,6 @@ import org.jboss.logging.Logger;
  * A class loader for a module.
  */
 public class ModuleClassLoader extends ClassLoader {
-    public static final ClassDesc CD_Module = ClassDesc.of("java.lang.Module");
-
-
     static {
         if (! ClassLoader.registerAsParallelCapable()) {
             throw new InternalError("Class loader cannot be made parallel-capable");
@@ -79,30 +75,34 @@ public class ModuleClassLoader extends ClassLoader {
     private final ReentrantLock linkLock = new ReentrantLock();
 
     private volatile LinkState linkState;
-    private final Controller controller = new Controller();
 
     /**
      * Construct a new instance.
      *
      * @param config the configuration (must not be {@code null})
+     * @param name the non-empty class loader name, or {@code null} for no name
      */
-    public ModuleClassLoader(ClassLoaderConfiguration config) {
-        super(config.classLoaderName(), null);
+    public ModuleClassLoader(ClassLoaderConfiguration config, String name) {
+        super(name, null);
+        config.checkAndClear();
         if (! isRegisteredAsParallelCapable()) {
             throw new IllegalStateException("Class loader is not registered as parallel-capable");
         }
         this.moduleLoader = config.moduleLoader();
-        this.moduleName = config.moduleName();
-        this.moduleVersion = config.moduleVersion();
-        this.mainClassName = config.mainClassName();
-        this.linkState = new LinkState.Initial(
-            config.dependencies(),
+        ModuleDescriptor descriptor = config.descriptor();
+        this.moduleName = descriptor.name();
+        this.moduleVersion = descriptor.version().orElse(null);
+        this.mainClassName = descriptor.mainClass().orElse(null);
+        this.linkState = new LinkState.Loaded(
+            moduleName,
+            mainClassName,
+            descriptor.dependencies(),
             config.resourceLoaders(),
-            config.packages(),
-            config.modifiers(),
-            config.uses(),
-            config.provides(),
-            config.location()
+            descriptor.packages(),
+            descriptor.modifiers(),
+            descriptor.uses(),
+            descriptor.provides(),
+            descriptor.location().orElse(null)
         );
     }
 
@@ -121,10 +121,34 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     /**
+     * {@return the name of this class loader's module}
+     */
+    public String moduleName() {
+        return moduleName;
+    }
+
+    /**
      * {@return the module loaded by this class loader}
      */
     public final Module module() {
         return linkDefined().module();
+    }
+
+    /**
+     * {@return the main class of this module, if any (not {@code null})}
+     */
+    public final Optional<Class<?>> mainClass() {
+        String mainClassName = this.mainClassName;
+        if (mainClassName == null) {
+            return Optional.empty();
+        }
+        Class<?> mainClass;
+        try {
+            mainClass = loadClassDirect(mainClassName);
+        } catch (ClassNotFoundException e) {
+            return Optional.empty();
+        }
+        return Optional.of(mainClass);
     }
 
     @Override
@@ -139,7 +163,7 @@ public class ModuleClassLoader extends ClassLoader {
         }
         String dotName = name.replace('/', '.');
         String packageName = Util.packageName(dotName);
-        if (packageName.isEmpty() || linkInitial().packages().containsKey(packageName)) {
+        if (packageName.isEmpty() || linkOpened().packages().containsKey(packageName)) {
             return loadClassDirect(name);
         }
         if (bootModuleIndex.containsKey(packageName)) {
@@ -255,19 +279,19 @@ public class ModuleClassLoader extends ClassLoader {
     /**
      * {@return the module class loader of the given module, or {@code null} if it does not have one}
      */
-    public static ModuleClassLoader forModule(Module module) {
+    public static ModuleClassLoader ofModule(Module module) {
         return module.getClassLoader() instanceof ModuleClassLoader mcl ? mcl : null;
+    }
+
+    /**
+     * {@return the module class loader of the given thread, or {@code null} if it does not have one}
+     */
+    public static ModuleClassLoader ofThread(Thread thread) {
+        return thread.getContextClassLoader() instanceof ModuleClassLoader mcl ? mcl : null;
     }
 
     public String toString() {
         return "ModuleClassLoader[" + moduleName + "]";
-    }
-
-    // special
-
-
-    protected <R> R resolving(Function<String, Class<?>> resolver, Supplier<R> action) {
-        throw new UnsupportedOperationException("TODO");
     }
 
     // private
@@ -377,7 +401,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (isServiceFileName(name)) {
             return loadServicesFileDirect(name);
         }
-        for (ResourceLoader loader : linkInitial().resourceLoaders()) {
+        for (ResourceLoader loader : linkOpened().resourceLoaders()) {
             Resource resource = loader.findResource(name);
             if (resource != null) {
                 return resource;
@@ -400,7 +424,7 @@ public class ModuleClassLoader extends ClassLoader {
             return Optional.ofNullable(loadServicesFileDirect(name)).map(List::of).orElse(List.of());
         }
         try {
-            return linkInitial().resourceLoaders().stream().map(l -> {
+            return linkOpened().resourceLoaders().stream().map(l -> {
                 try {
                     return l.findResource(name);
                 } catch (IOException e) {
@@ -531,9 +555,9 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
-    LinkState.Initial linkInitial() {
+    LinkState.Loaded linkOpened() {
         LinkState linkState = this.linkState;
-        if (linkState instanceof LinkState.Initial state) {
+        if (linkState instanceof LinkState.Loaded state) {
             return state;
         }
         assert linkState == LinkState.Closed.INSTANCE;
@@ -541,7 +565,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     LinkState.Dependencies linkDependencies() {
-        LinkState.Initial linkState = linkInitial();
+        LinkState.Loaded linkState = linkOpened();
         if (linkState instanceof LinkState.Dependencies deps) {
             return deps;
         }
@@ -564,7 +588,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private LinkState.Dependencies linkDependenciesLocked(List<LoadedModule> loadedDependencies) {
-        LinkState.Initial linkState = linkInitial();
+        LinkState.Loaded linkState = linkOpened();
         if (linkState instanceof LinkState.Dependencies deps) {
             return deps;
         }
@@ -588,7 +612,7 @@ public class ModuleClassLoader extends ClassLoader {
     );
 
     private LinkState.Defined linkDefined() {
-        LinkState.Initial linkState = linkDependencies();
+        LinkState.Loaded linkState = linkDependencies();
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }
@@ -679,13 +703,13 @@ public class ModuleClassLoader extends ClassLoader {
         if (visited.add(loaded)) {
             linkState.addReads(loaded.module());
             if (loaded.classLoader() instanceof ModuleClassLoader mcl) {
-                Set<String> packages = mcl.linkInitial().packages().keySet();
+                Set<String> packages = mcl.linkOpened().packages().keySet();
                 for (String pkg : packages) {
                     if (mcl.module().isExported(pkg, linkState.module())) {
                         modulesByPackage.putIfAbsent(pkg, mcl.module());
                     }
                 }
-                for (Dependency dependency : mcl.linkInitial().dependencies()) {
+                for (Dependency dependency : mcl.linkOpened().dependencies()) {
                     if (dependency.modifiers().contains(Dependency.Modifier.TRANSITIVE)) {
                         LoadedModule dep = dependency.moduleLoader().orElse(mcl.moduleLoader()).loadModule(dependency.moduleName());
                         if (dep == null) {
@@ -754,16 +778,14 @@ public class ModuleClassLoader extends ClassLoader {
                         if (lm.classLoader() instanceof ModuleClassLoader mcl) {
                             mcl.linkDefined().addExports(entry.getKey(), module);
                         } else {
-                            // might not work!
-                            lm.module().addExports(entry.getKey(), module);
+                            Util.addExports(lm.module(), entry.getKey(), module);
                         }
                     }
                     case OPEN -> {
                         if (lm.classLoader() instanceof ModuleClassLoader mcl) {
                             mcl.linkDefined().addOpens(entry.getKey(), module);
                         } else {
-                            // might not work!
-                            lm.module().addOpens(entry.getKey(), module);
+                            Util.addOpens(lm.module(), entry.getKey(), module);
                         }
                     }
                 }
@@ -774,15 +796,15 @@ public class ModuleClassLoader extends ClassLoader {
             modulesByPackage.put(pkg, linkState.module());
         }
         // link up directed exports and opens
-        for (Map.Entry<String, io.github.dmlloyd.modules.desc.Package> entry : linkState.packages().entrySet()) {
+        for (Map.Entry<String, PackageInfo> entry : linkState.packages().entrySet()) {
             for (String target : entry.getValue().exportTargets()) {
-                LoadedModule resolved = moduleLoader().doLoadModule(target);
+                LoadedModule resolved = moduleLoader().loadModule(target);
                 if (resolved != null) {
                     linkState.addExports(entry.getKey(), resolved.module());
                 }
             }
             for (String target : entry.getValue().openTargets()) {
-                LoadedModule resolved = moduleLoader().doLoadModule(target);
+                LoadedModule resolved = moduleLoader().loadModule(target);
                 if (resolved != null) {
                     linkState.addOpens(entry.getKey(), resolved.module());
                 }
@@ -817,12 +839,6 @@ public class ModuleClassLoader extends ClassLoader {
         LinkState.Packages linkState = linkPackages();
         if (linkState instanceof LinkState.Provides st) {
             return st;
-        }
-        for (String used : linkState.uses()) {
-            try {
-                linkState.addUses(loadClass(used));
-            } catch (ClassNotFoundException ignored) {
-            }
         }
         // define provided services
         for (Map.Entry<String, List<String>> entry : linkState.provides().entrySet()) {
@@ -869,6 +885,12 @@ public class ModuleClassLoader extends ClassLoader {
                 mcl.linkProvides();
             }
         }
+        for (String used : linkState.uses()) {
+            try {
+                linkState.addUses(loadClass(used));
+            } catch (ClassNotFoundException ignored) {
+            }
+        }
         return doLocked(ModuleClassLoader::linkUsesLocked);
     }
 
@@ -903,14 +925,14 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private Resource loadModuleInfo() {
-        if (linkInitial().modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
+        if (linkOpened().modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
             // no module-info for unnamed modules
             return null;
         }
         // todo: copy annotations
         byte[] bytes = ClassFile.of().build(ConstantUtils.CD_module_info, zb -> {
             zb.withVersion(ClassFile.JAVA_9_VERSION, 0);
-            zb.withFlags(flagsOfModule(linkInitial().modifiers()));
+            zb.withFlags(flagsOfModule(linkOpened().modifiers()));
             zb.with(ModuleAttribute.of(
                 ModuleDesc.of(moduleName),
                 mab -> {
@@ -919,7 +941,7 @@ public class ModuleClassLoader extends ClassLoader {
                     // java.base is always required
                     mab.requires(ModuleDesc.of("java.base"), Set.of(AccessFlag.MANDATED, AccessFlag.SYNTHETIC), null);
                     // list unqualified exports & opens
-                    linkInitial().packages()
+                    linkOpened().packages()
                         .forEach((name, pkg) -> {
                             switch (pkg.packageAccess()) {
                                 case EXPORTED -> mab.exports(PackageDesc.of(name), List.of());
@@ -928,7 +950,7 @@ public class ModuleClassLoader extends ClassLoader {
                         });
                 }
             ));
-            zb.with(ModulePackagesAttribute.of(linkInitial().packages().keySet().stream()
+            zb.with(ModulePackagesAttribute.of(linkOpened().packages().keySet().stream()
                 .map(n -> zb.constantPool().packageEntry(PackageDesc.of(n)))
                 .toList()
             ));
@@ -1060,16 +1082,21 @@ public class ModuleClassLoader extends ClassLoader {
         throw new UnsupportedOperationException();
     }
 
+
+    String mainClassName() {
+        return mainClassName;
+    }
+
     void close() throws IOException {
         if (linkState == LinkState.Closed.INSTANCE) {
             return;
         }
         ReentrantLock lock = linkLock;
-        LinkState.Initial init;
+        LinkState.Loaded init;
         lock.lock();
         try {
             // refresh under lock
-            if (linkState instanceof LinkState.Initial is) {
+            if (linkState instanceof LinkState.Loaded is) {
                 init = is;
                 linkState = LinkState.Closed.INSTANCE;
             } else {
@@ -1096,122 +1123,41 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
-    Controller controller() {
-        return controller;
-    }
-
-    String mainClassName() {
-        return mainClassName;
-    }
-
     public static final class ClassLoaderConfiguration {
+        private Thread valid;
         private final ModuleLoader moduleLoader;
-        private final String classLoaderName;
         private final List<ResourceLoader> resourceLoaders;
-        private final String moduleName;
-        private final String moduleVersion;
-        private final List<Dependency> dependencies;
-        private final Map<String, io.github.dmlloyd.modules.desc.Package> packages;
-        private final Modifiers<ModuleDescriptor.Modifier> modifiers;
-        private final Set<String> uses;
-        private final Map<String, List<String>> provides;
-        private final URI location;
-        private final String mainClassName;
+        private final ModuleDescriptor descriptor;
 
-        ClassLoaderConfiguration(
-            ModuleLoader moduleLoader,
-            String classLoaderName,
-            List<ResourceLoader> resourceLoaders,
-            String moduleName,
-            String moduleVersion,
-            List<Dependency> dependencies,
-            Map<String, io.github.dmlloyd.modules.desc.Package> packages,
-            Modifiers<ModuleDescriptor.Modifier> modifiers,
-            Set<String> uses,
-            Map<String, List<String>> provides,
-            URI location,
-            String mainClassName
-        ) {
+        ClassLoaderConfiguration(final ModuleLoader moduleLoader, final List<ResourceLoader> resourceLoaders, final ModuleDescriptor descriptor) {
+            valid = Thread.currentThread();
             this.moduleLoader = moduleLoader;
-            this.classLoaderName = classLoaderName;
             this.resourceLoaders = resourceLoaders;
-            this.moduleName = moduleName;
-            this.moduleVersion = moduleVersion;
-            this.dependencies = dependencies;
-            this.packages = packages;
-            this.modifiers = modifiers;
-            this.uses = uses;
-            this.provides = provides;
-            this.location = location;
-            this.mainClassName = mainClassName;
+            this.descriptor = descriptor;
+        }
+
+        void checkAndClear() {
+            if (valid == Thread.currentThread()) {
+                valid = null;
+                return;
+            }
+            throw new SecurityException("Use of class loader configuration outside of context");
+        }
+
+        void clear() {
+            valid = null;
         }
 
         ModuleLoader moduleLoader() {
             return moduleLoader;
         }
 
-        String classLoaderName() {
-            return classLoaderName;
-        }
-
         List<ResourceLoader> resourceLoaders() {
             return resourceLoaders;
         }
 
-        String moduleName() {
-            return moduleName;
-        }
-
-        String moduleVersion() {
-            return moduleVersion;
-        }
-
-        List<Dependency> dependencies() {
-            return dependencies;
-        }
-
-        Map<String, io.github.dmlloyd.modules.desc.Package> packages() {
-            return packages;
-        }
-
-        Modifiers<ModuleDescriptor.Modifier> modifiers() {
-            return modifiers;
-        }
-
-        Set<String> uses() {
-            return uses;
-        }
-
-        Map<String, List<String>> provides() {
-            return provides;
-        }
-
-        URI location() {
-            return location;
-        }
-
-        String mainClassName() {
-            return mainClassName;
-        }
-    }
-
-    public final class Controller {
-        Controller() {
-        }
-
-        /**
-         * Unload this module.
-         */
-        public void close() throws IOException {
-            ModuleClassLoader.this.close();
-        }
-
-        public ModuleClassLoader classLoader() {
-            return ModuleClassLoader.this;
-        }
-
-        public Class<?> defineClass(String name, ByteBuffer bytes, ProtectionDomain protectionDomain) {
-            return ModuleClassLoader.this.defineOrGetClass(name, bytes, protectionDomain);
+        public ModuleDescriptor descriptor() {
+            return descriptor;
         }
     }
 

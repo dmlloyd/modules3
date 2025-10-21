@@ -1,15 +1,22 @@
 package io.github.dmlloyd.modules.desc;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.module.FindException;
 import java.net.URI;
+import java.nio.file.DirectoryStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.function.BiFunction;
+import java.util.jar.Attributes.Name;
+import java.util.jar.Manifest;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -22,7 +29,9 @@ import io.github.dmlloyd.classfile.Attributes;
 import io.github.dmlloyd.classfile.ClassFile;
 import io.github.dmlloyd.classfile.ClassModel;
 import io.github.dmlloyd.classfile.attribute.ModuleAttribute;
+import io.github.dmlloyd.classfile.attribute.ModuleExportInfo;
 import io.github.dmlloyd.classfile.attribute.ModuleMainClassAttribute;
+import io.github.dmlloyd.classfile.attribute.ModuleOpenInfo;
 import io.github.dmlloyd.classfile.attribute.ModulePackagesAttribute;
 import io.github.dmlloyd.classfile.attribute.RuntimeVisibleAnnotationsAttribute;
 import io.github.dmlloyd.classfile.constantpool.ClassEntry;
@@ -30,9 +39,11 @@ import io.github.dmlloyd.classfile.constantpool.ModuleEntry;
 import io.github.dmlloyd.classfile.constantpool.PackageEntry;
 import io.github.dmlloyd.classfile.constantpool.Utf8Entry;
 import io.github.dmlloyd.classfile.extras.reflect.AccessFlag;
-import io.github.dmlloyd.modules.ModuleClassLoader;
 import io.github.dmlloyd.modules.NativeAccess;
+import io.github.dmlloyd.modules.impl.TextIter;
 import io.smallrye.common.constraint.Assert;
+import io.smallrye.common.resource.Resource;
+import io.smallrye.common.resource.ResourceLoader;
 
 /**
  * A descriptor for initially defining a module.
@@ -40,31 +51,25 @@ import io.smallrye.common.constraint.Assert;
 public record ModuleDescriptor(
     String name,
     Optional<String> version,
-    Optional<String> classLoaderName,
     Modifiers<Modifier> modifiers,
     Optional<String> mainClass,
     Optional<URI> location,
-    Function<ModuleClassLoader.ClassLoaderConfiguration, ModuleClassLoader> classLoaderFactory,
     List<Dependency> dependencies,
     Set<String> uses,
     Map<String, List<String>> provides,
-    List<ResourceLoaderOpener> resourceLoaderOpeners,
-    Map<String, Package> packages
+    Map<String, PackageInfo> packages
 ) {
 
     public ModuleDescriptor {
         Assert.checkNotNullParam("name", name);
         Assert.checkNotNullParam("version", version);
-        Assert.checkNotNullParam("classLoaderName", classLoaderName);
         Assert.checkNotNullParam("modifiers", modifiers);
         Assert.checkNotNullParam("mainClass", mainClass);
         Assert.checkNotNullParam("location", location);
-        Assert.checkNotNullParam("classLoaderFactory", classLoaderFactory);
         dependencies = List.copyOf(dependencies);
         packages = Map.copyOf(packages);
         uses = Set.copyOf(uses);
         provides = Map.copyOf(provides);
-        resourceLoaderOpeners = List.copyOf(resourceLoaderOpeners);
         packages = Map.copyOf(packages);
     }
 
@@ -72,36 +77,16 @@ public record ModuleDescriptor(
         return new ModuleDescriptor(
             name,
             version,
-            classLoaderName,
             modifiers,
             mainClass,
             location,
-            classLoaderFactory,
             dependencies,
             uses,
             provides,
-            resourceLoaderOpeners,
             packages
         );
     }
 
-
-    public ModuleDescriptor withResourceLoaders(final List<ResourceLoaderOpener> resourceLoaderOpeners) {
-        return new ModuleDescriptor(
-            name,
-            version,
-            classLoaderName,
-            modifiers,
-            mainClass,
-            location,
-            classLoaderFactory,
-            dependencies,
-            uses,
-            provides,
-            resourceLoaderOpeners,
-            packages
-        );
-    }
 
     public ModuleDescriptor withAdditionalDependencies(final List<Dependency> list) {
         if (list.isEmpty()) {
@@ -110,18 +95,138 @@ public record ModuleDescriptor(
             return new ModuleDescriptor(
                 name,
                 version,
-                classLoaderName,
                 modifiers,
                 mainClass,
                 location,
-                classLoaderFactory,
-                Stream.concat(dependencies.stream(), list.stream()).toList(),
+                Util.concat(dependencies, list),
                 uses,
                 provides,
-                resourceLoaderOpeners,
                 packages
             );
         }
+    }
+
+    public ModuleDescriptor withPackages(final Map<String, PackageInfo> packages) {
+        if (packages == this.packages) {
+            return this;
+        } else {
+            return new ModuleDescriptor(
+                name,
+                version,
+                modifiers,
+                mainClass,
+                location,
+                dependencies,
+                uses,
+                provides,
+                packages
+            );
+        }
+    }
+
+    public ModuleDescriptor withAdditionalPackages(final Map<String, PackageInfo> packages) {
+        if (packages.isEmpty()) {
+            return this;
+        }
+        Map<String, PackageInfo> existing = packages();
+        if (existing.isEmpty()) {
+            return withPackages(packages);
+        } else {
+            return withPackages(Util.merge(existing, packages, PackageInfo::mergedWith));
+        }
+    }
+
+    public ModuleDescriptor withDiscoveredPackages(final List<ResourceLoader> loaders) throws IOException {
+        ModuleDescriptor desc = this;
+        for (ResourceLoader loader : loaders) {
+            desc = desc.withDiscoveredPackages(loader);
+        }
+        return desc;
+    }
+
+    public ModuleDescriptor withDiscoveredPackages(final ResourceLoader loader) throws IOException {
+        return withDiscoveredPackages(loader, (pn, existing) -> {
+            if (pn.contains(".impl.") || pn.endsWith(".impl")
+                || pn.contains(".private_.") || pn.endsWith(".private_")
+                || pn.contains("._private.") || pn.endsWith("._private")
+            ) {
+                return existing == null ? PackageInfo.PRIVATE : existing;
+            } else {
+                return existing == null ? PackageInfo.EXPORTED : existing.withAccessAtLeast(PackageAccess.EXPORTED);
+            }
+        });
+    }
+
+    public ModuleDescriptor withDiscoveredPackages(final ResourceLoader loader, final PackageAccess access) throws IOException {
+        return withDiscoveredPackages(loader, (ignored0, existing) -> existing == null ? PackageInfo.forAccess(access) : existing.withAccessAtLeast(access));
+    }
+
+    public ModuleDescriptor withDiscoveredPackages(final ResourceLoader loader, final BiFunction<String, PackageInfo, PackageInfo> packageFunction) throws IOException {
+        Map<String, PackageInfo> packages = searchPackages(loader.findResource("/"), packageFunction, this.packages, new HashSet<>());
+        if (packages == this.packages) {
+            return this;
+        } else {
+            return new ModuleDescriptor(
+                name,
+                version,
+                modifiers,
+                mainClass,
+                location,
+                dependencies,
+                uses,
+                provides,
+                packages
+            );
+        }
+    }
+
+    public ModuleDescriptor withAdditionalServiceProviders(Map<String, List<String>> provides) {
+        if (provides.isEmpty()) {
+            return this;
+        } else {
+            return new ModuleDescriptor(
+                name,
+                version,
+                modifiers,
+                mainClass,
+                location,
+                dependencies,
+                uses,
+                Util.merge(provides(), provides, Util::concat),
+                packages
+            );
+        }
+    }
+
+    private Map<String, PackageInfo> searchPackages(final Resource dir, final BiFunction<String, PackageInfo, PackageInfo> packageFunction, Map<String, PackageInfo> map, Set<String> found) throws IOException {
+        try (DirectoryStream<Resource> ds = dir.openDirectoryStream()) {
+            for (Resource child : ds) {
+                if (child.isDirectory()) {
+                    map = searchPackages(child, packageFunction, map, found);
+                } else {
+                    String pathName = child.pathName();
+                    if (pathName.endsWith(".class")) {
+                        int idx = pathName.lastIndexOf('/');
+                        if (idx != -1) {
+                            String pn = pathName.substring(0, idx).replace('/', '.');
+                            if (found.add(pn)) {
+                                PackageInfo existing = map.get(pn);
+                                PackageInfo update = packageFunction.apply(pn, existing);
+                                if (update == null || update.equals(existing)) {
+                                    // skip it
+                                    continue;
+                                }
+                                if (map == packages) {
+                                    map = new HashMap<>(packages);
+                                }
+                                map.put(pn, update);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return map;
     }
 
     /**
@@ -154,15 +259,18 @@ public record ModuleDescriptor(
     /**
      * Obtain a module descriptor from a {@code module-info.class} file's contents.
      *
-     * @param moduleInfoBytes the bytes of the {@code module-info.class} (must not be {@code null})
-     * @param packageFinder the package finder to use if the descriptor does not contain a list of packages (must not be {@code null})
+     * @param moduleInfo the bytes of the {@code module-info.class} (must not be {@code null})
+     * @param resourceLoaders the loaders from which packages may be discovered if not given in the descriptor (must not be {@code null})
      * @return the module descriptor (not {@code null})
      */
     public static ModuleDescriptor fromModuleInfo(
-        byte[] moduleInfoBytes,
-        Supplier<Set<String>> packageFinder
-    ) {
-        ClassModel classModel = ClassFile.of().parse(moduleInfoBytes);
+        Resource moduleInfo,
+        List<ResourceLoader> resourceLoaders
+    ) throws IOException {
+        ClassModel classModel;
+        try (InputStream is = moduleInfo.openStream()) {
+            classModel = ClassFile.of().parse(is.readAllBytes());
+        }
         if (! classModel.isModuleInfo()) {
             throw new IllegalArgumentException("Not a valid module descriptor");
         }
@@ -171,7 +279,8 @@ public record ModuleDescriptor(
         Optional<ModuleMainClassAttribute> mca = classModel.findAttribute(Attributes.moduleMainClass());
         Optional<RuntimeVisibleAnnotationsAttribute> rva = classModel.findAttribute(Attributes.runtimeVisibleAnnotations());
         Modifiers<ModuleDescriptor.Modifier> mods = Modifiers.of();
-        if (classModel.flags().has(AccessFlag.OPEN)) {
+        boolean open = classModel.flags().has(AccessFlag.OPEN);
+        if (open) {
             mods = mods.with(Modifier.OPEN);
         }
         if (rva.isPresent()) {
@@ -181,38 +290,31 @@ public record ModuleDescriptor(
                 mods = mods.with(Modifier.NATIVE_ACCESS);
             }
         }
-        Map<String, Package> packagesMap = new HashMap<>();
-        ma.opens().forEach(e -> {
-            String packageName = e.openedPackage().name().stringValue().replace('/', '.').intern();
-            if (e.opensTo().isEmpty()) {
-                // open to all
-                packagesMap.put(packageName, Package.OPEN);
-            } else {
-                // open to some, otherwise private (for now)
-                packagesMap.put(packageName, new Package(
-                    PackageAccess.PRIVATE,
-                    Set.of(),
-                    e.opensTo().stream()
-                        .map(ModuleEntry::name)
-                        .map(Utf8Entry::stringValue)
-                        .map(String::intern)
-                        .collect(Collectors.toUnmodifiableSet()
-                    )
-                ));
-            }
-        });
-        ma.exports().forEach(e -> {
+        Map<String, PackageInfo> packagesMap = new HashMap<>();
+        for (ModuleOpenInfo moduleOpenInfo : ma.opens()) {
+            String packageName = moduleOpenInfo.openedPackage().name().stringValue().replace('/', '.').intern();
+            packagesMap.put(packageName, open ? PackageInfo.OPEN : PackageInfo.of(
+                PackageAccess.PRIVATE,
+                Set.of(),
+                moduleOpenInfo.opensTo().stream()
+                    .map(ModuleEntry::name)
+                    .map(Utf8Entry::stringValue)
+                    .map(String::intern)
+                    .collect(Collectors.toUnmodifiableSet()
+                )
+            ));
+        }
+        for (ModuleExportInfo e : ma.exports()) {
             String packageName = e.exportedPackage().name().stringValue().replace('/', '.').intern();
-            if (e.exportsTo().isEmpty()) {
+            if (open) {
+                packagesMap.put(packageName, PackageInfo.OPEN);
+            } else if (e.exportsTo().isEmpty()) {
                 // exports to all
                 packagesMap.compute(packageName, (name, oldVal) -> {
                     if (oldVal == null) {
-                        return Package.EXPORTED;
-                    } else if (oldVal.packageAccess() == PackageAccess.PRIVATE) {
-                        return new Package(PackageAccess.EXPORTED, Set.of(), oldVal.openTargets());
+                        return PackageInfo.EXPORTED;
                     } else {
-                        // already exported (opened actually)
-                        return oldVal;
+                        return oldVal.withAccessAtLeast(PackageAccess.EXPORTED);
                     }
                 });
             } else {
@@ -221,33 +323,24 @@ public record ModuleDescriptor(
                     .map(ModuleEntry::name)
                     .map(Utf8Entry::stringValue)
                     .map(String::intern)
-                    .collect(Collectors.toUnmodifiableSet()
-                );
-                packagesMap.compute(packageName, (name, oldVal) -> {
-                    if (oldVal == null) {
-                        return new Package(PackageAccess.PRIVATE, exportTargets, Set.of());
-                    } else {
-                        return new Package(oldVal.packageAccess(), exportTargets, oldVal.openTargets());
-                    }
-                });
+                    .collect(Collectors.toUnmodifiableSet());
+                if (packagesMap.containsKey(packageName)) {
+                    packagesMap.put(packageName, packagesMap.get(packageName).withExportTargets(exportTargets));
+                } else {
+                    packagesMap.put(packageName, PackageInfo.of(PackageAccess.PRIVATE, exportTargets, Set.of()));
+                }
             }
-        });
-        Stream<String> stream;
-        if (mpa.isEmpty()) {
-            stream = packageFinder.get().stream();
-        } else {
-            stream = mpa.get().packages().stream()
-                .map(PackageEntry::name)
-                .map(Utf8Entry::stringValue)
-                .map(s -> s.replace('/', '.'));
         }
-        stream.map(String::intern).forEach(name ->
-            packagesMap.putIfAbsent(name, Package.PRIVATE)
+        mpa.ifPresent(modulePackagesAttribute -> modulePackagesAttribute.packages().stream()
+            .map(PackageEntry::name)
+            .map(Utf8Entry::stringValue)
+            .map(s -> s.replace('/', '.'))
+            .map(String::intern)
+            .forEach(name -> packagesMap.putIfAbsent(name, PackageInfo.PRIVATE))
         );
-        return new ModuleDescriptor(
+        ModuleDescriptor desc = new ModuleDescriptor(
             ma.moduleName().name().stringValue(),
             ma.moduleVersion().map(Utf8Entry::stringValue),
-            Optional.empty(),
             mods,
             mca.map(ModuleMainClassAttribute::mainClass)
                 .map(ClassEntry::name)
@@ -255,7 +348,6 @@ public record ModuleDescriptor(
                 .map(s -> s.replace('/', '.'))
                 .map(String::intern),
             Optional.empty(),
-            ModuleClassLoader::new,
             ma.requires().stream().map(
                 r -> new Dependency(
                     r.requires().name().stringValue(),
@@ -269,7 +361,7 @@ public record ModuleDescriptor(
                 .map(s -> s.replace('/', '.'))
                 .map(String::intern)
                 .collect(Collectors.toUnmodifiableSet()
-            ),
+                ),
             ma.provides().stream().map(
                 mpi -> Map.entry(mpi.provides().name().stringValue().replace('/', '.').intern(),
                     mpi.providesWith().stream()
@@ -279,22 +371,138 @@ public record ModuleDescriptor(
                         .map(String::intern)
                         .toList())
             ).collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue)),
-            List.of(),
             packagesMap
         );
+        if (mpa.isEmpty()) {
+            desc = desc.withDiscoveredPackages(resourceLoaders);
+        }
+        return desc;
     }
 
-    private static Modifiers<Dependency.Modifier> toModifiers(final Set<AccessFlag> accessFlags) {
-        Modifiers<Dependency.Modifier> mods = Modifiers.of();
-        for (AccessFlag accessFlag : accessFlags) {
-            switch (accessFlag) {
-                case STATIC_PHASE -> mods = mods.with(Dependency.Modifier.OPTIONAL);
-                case SYNTHETIC -> mods = mods.with(Dependency.Modifier.SYNTHETIC);
-                case MANDATED -> mods = mods.with(Dependency.Modifier.MANDATED);
-                case TRANSITIVE -> mods = mods.with(Dependency.Modifier.TRANSITIVE);
+    private static <E> HashSet<E> newHashSet(Object ignored) {
+        return new HashSet<>();
+    }
+
+    private static Map<String, Set<String>> parseManifestAdd(String value) {
+        if (value == null) {
+            return Map.of();
+        }
+        Map<String, Set<String>> map = Map.of();
+        TextIter iter = TextIter.of(value);
+        iter.skipWhiteSpace();
+        while (iter.hasNext()) {
+            String moduleName = dotName(iter);
+            if (iter.peekNext() != '/') {
+                throw invalidChar(value, iter.peekNext(), iter.position());
+            }
+            iter.next(); // consume /
+            String packageName = dotName(iter);
+            if (map.isEmpty()) {
+                map = new LinkedHashMap<>();
+            }
+            map.computeIfAbsent(moduleName, ModuleDescriptor::newHashSet).add(packageName);
+            iter.skipWhiteSpace();
+        }
+        return map;
+    }
+
+    private static IllegalArgumentException invalidChar(final String str, final int cp, final int idx) {
+        return new IllegalArgumentException("Invalid character '%s' at index %d of \"%s\"".formatted(Character.toString(cp), Integer.valueOf(idx), str));
+    }
+
+    private static String dotName(TextIter iter) {
+        int cp = iter.peekNext();
+        if (Character.isJavaIdentifierStart(cp)) {
+            int start = iter.position();
+            iter.next(); // consume
+            while (iter.hasNext()) {
+                cp = iter.peekNext();
+                if (! Character.isJavaIdentifierPart(cp)) {
+                    // done
+                    return iter.substring(start);
+                }
+            }
+            // end of string
+            return iter.substring(start);
+        }
+        throw invalidChar(iter.text(), cp, iter.position());
+    }
+
+    public static ModuleDescriptor fromManifest(String defaultName, String defaultVersion, Manifest manifest, List<ResourceLoader> resourceLoaders) throws IOException {
+        var mainAttributes = manifest.getMainAttributes();
+        String moduleName = mainAttributes.getValue("Automatic-Module-Name");
+        String version = mainAttributes.getValue("Module-Version");
+        if (version == null) {
+            version = mainAttributes.getValue(Name.IMPLEMENTATION_VERSION);
+        }
+        if (version == null) {
+            version = defaultVersion;
+        }
+        boolean enableNativeAccess = ! Objects.requireNonNullElse(mainAttributes.getValue("Enable-Native-Access"), "").trim().isEmpty();
+        String mainClass = mainAttributes.getValue(Name.MAIN_CLASS);
+        String depString = mainAttributes.getValue("Dependencies");
+        Map<String, Set<String>> addOpens = parseManifestAdd(mainAttributes.getValue("Add-Opens"));
+        Map<String, Set<String>> addExports = parseManifestAdd(mainAttributes.getValue("Add-Exports"));
+
+        List<Dependency> dependencies = List.of();
+        if (depString != null) {
+            TextIter iter = TextIter.of(depString);
+            iter.skipWhiteSpace();
+            while (iter.hasNext()) {
+                String depName = dotName(iter);
+                Modifiers<Dependency.Modifier> mods = Modifiers.of();
+                iter.skipWhiteSpace();
+                while (iter.hasNext()) {
+                    if (iter.peekNext() == ',') {
+                        // done with this dependency
+                        break;
+                    }
+                    if (iter.match("optional")) {
+                        mods = mods.with(Dependency.Modifier.OPTIONAL);
+                    } else if (iter.match("export")) {
+                        mods = mods.with(Dependency.Modifier.TRANSITIVE);
+                    } else {
+                        iter.skipUntil(cp -> Character.isWhitespace(cp) || cp == ',');
+                        iter.skipWhiteSpace();
+                    }
+                    // else ignored
+                }
+                Map<String, PackageAccess> accesses;
+                if (addOpens.containsKey(depName) || addExports.containsKey(depName)) {
+                    accesses = Stream.concat(
+                        addExports.get(depName).stream().map(pkg -> Map.entry(pkg, PackageAccess.EXPORTED)),
+                        addOpens.get(depName).stream().map(pkg -> Map.entry(pkg, PackageAccess.OPEN))
+                    ).collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue, PackageAccess::max));
+                } else {
+                    accesses = Map.of();
+                }
+                if (dependencies.isEmpty()) {
+                    dependencies = new ArrayList<>();
+                }
+                dependencies.add(new Dependency(depName, mods, Optional.empty(), accesses));
             }
         }
-        return mods;
+        if (moduleName == null) {
+            moduleName = defaultName;
+        }
+        if (moduleName == null || moduleName.isEmpty()) {
+            throw new FindException("A valid module name is required");
+        }
+        Modifiers<Modifier> mods = Modifiers.of(Modifier.AUTOMATIC);
+        if (enableNativeAccess) {
+            mods = mods.with(Modifier.NATIVE_ACCESS);
+        }
+        return new ModuleDescriptor(
+            moduleName,
+            Optional.ofNullable(version),
+            mods,
+            Optional.ofNullable(mainClass),
+            Optional.empty(),
+            dependencies,
+            Set.of(),
+            Map.of(),
+            Map.of()
+        ).withDiscoveredPackages(resourceLoaders);
     }
 
     public static ModuleDescriptor fromXml(XMLStreamReader xml) throws XMLStreamException {
@@ -320,7 +528,7 @@ public record ModuleDescriptor(
         List<Dependency> dependencies = List.of();
         Set<String> uses = Set.of();
         Map<String, List<String>> provides = Map.of();
-        Map<String, Package> packages = Map.of();
+        Map<String, PackageInfo> packages = Map.of();
         // attributes
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
@@ -371,15 +579,12 @@ public record ModuleDescriptor(
                     return new ModuleDescriptor(
                         name,
                         version,
-                        mods.contains(Modifier.UNNAMED) ? version.isPresent() ? Optional.of("[" + name + "@" + version.get() + "]") : Optional.of("[" + name + "]") : Optional.empty(),
                         mods,
                         mainClass,
                         Optional.empty(),
-                        ModuleClassLoader::new,
                         dependencies,
                         uses,
                         provides,
-                        List.of(),
                         packages
                     );
                 }
@@ -474,8 +679,8 @@ public record ModuleDescriptor(
         }
     }
 
-    private static Map<String, Package> parsePackagesElement(final XMLStreamReader xml) throws XMLStreamException {
-        Map<String, Package> packages = new HashMap<>();
+    private static Map<String, PackageInfo> parsePackagesElement(final XMLStreamReader xml) throws XMLStreamException {
+        Map<String, PackageInfo> packages = new HashMap<>();
         for (;;) {
             switch (xml.nextTag()) {
                 case XMLStreamConstants.START_ELEMENT -> {
@@ -494,7 +699,7 @@ public record ModuleDescriptor(
         }
     }
 
-    private static void parsePrivatePackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
+    private static void parsePrivatePackageElement(final XMLStreamReader xml, final Map<String, PackageInfo> packages) throws XMLStreamException {
         String pkg = null;
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
@@ -539,9 +744,9 @@ public record ModuleDescriptor(
                 }
                 case XMLStreamConstants.END_ELEMENT -> {
                     if (exportTargets.isEmpty() && openTargets.isEmpty()) {
-                        packages.put(pkg, Package.PRIVATE);
+                        packages.put(pkg, PackageInfo.PRIVATE);
                     } else {
-                        packages.put(pkg, new Package(PackageAccess.PRIVATE, exportTargets, openTargets));
+                        packages.put(pkg, new PackageInfo(PackageAccess.PRIVATE, exportTargets, openTargets));
                     }
                     return;
                 }
@@ -549,7 +754,7 @@ public record ModuleDescriptor(
         }
     }
 
-    private static void parseExportPackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
+    private static void parseExportPackageElement(final XMLStreamReader xml, final Map<String, PackageInfo> packages) throws XMLStreamException {
         String pkg = null;
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
@@ -583,9 +788,9 @@ public record ModuleDescriptor(
                 }
                 case XMLStreamConstants.END_ELEMENT -> {
                     if (openTargets.isEmpty()) {
-                        packages.put(pkg, Package.EXPORTED);
+                        packages.put(pkg, PackageInfo.EXPORTED);
                     } else {
-                        packages.put(pkg, new Package(PackageAccess.EXPORTED, Set.of(), openTargets));
+                        packages.put(pkg, new PackageInfo(PackageAccess.EXPORTED, Set.of(), openTargets));
                     }
                     return;
                 }
@@ -593,7 +798,7 @@ public record ModuleDescriptor(
         }
     }
 
-    private static void parseOpenPackageElement(final XMLStreamReader xml, final Map<String, Package> packages) throws XMLStreamException {
+    private static void parseOpenPackageElement(final XMLStreamReader xml, final Map<String, PackageInfo> packages) throws XMLStreamException {
         String pkg = null;
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
@@ -609,7 +814,7 @@ public record ModuleDescriptor(
         if (xml.nextTag() != XMLStreamConstants.END_ELEMENT) {
             throw unknownElement(xml);
         }
-        packages.put(pkg, Package.OPEN);
+        packages.put(pkg, PackageInfo.OPEN);
     }
 
     private static String parsePackageToElement(final XMLStreamReader xml) throws XMLStreamException {
@@ -755,14 +960,27 @@ public record ModuleDescriptor(
         return name;
     }
 
-    private static XMLStreamException missingAttribute(final XMLStreamReader xml, final String name) {
-        return new XMLStreamException("Missing required attribute \"" + name + "\"", xml.getLocation());
+    private static Modifiers<Dependency.Modifier> toModifiers(final Set<AccessFlag> accessFlags) {
+        Modifiers<Dependency.Modifier> mods = Modifiers.of();
+        for (AccessFlag accessFlag : accessFlags) {
+            switch (accessFlag) {
+                case STATIC_PHASE -> mods = mods.with(Dependency.Modifier.OPTIONAL);
+                case SYNTHETIC -> mods = mods.with(Dependency.Modifier.SYNTHETIC);
+                case MANDATED -> mods = mods.with(Dependency.Modifier.MANDATED);
+                case TRANSITIVE -> mods = mods.with(Dependency.Modifier.TRANSITIVE);
+            }
+        }
+        return mods;
     }
 
     private static void checkNamespace(final XMLStreamReader xml) throws XMLStreamException {
         if (! "urn:jboss:module:3.0".equals(xml.getNamespaceURI())) {
             throw unknownElement(xml);
         }
+    }
+
+    private static XMLStreamException missingAttribute(final XMLStreamReader xml, final String name) {
+        return new XMLStreamException("Missing required attribute \"" + name + "\"", xml.getLocation());
     }
 
     private static XMLStreamException unexpectedContent(final XMLStreamReader xml) {
@@ -784,4 +1002,5 @@ public record ModuleDescriptor(
     private static IllegalArgumentException noModuleAttribute() {
         return new IllegalArgumentException("No module attribute found in module descriptor");
     }
+
 }
