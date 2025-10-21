@@ -1,15 +1,11 @@
 package io.github.dmlloyd.modules;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.List;
-import java.util.Objects;
-import java.util.jar.Manifest;
+import java.util.Map;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.github.dmlloyd.modules.impl.TextIter;
-import io.smallrye.common.resource.JarFileResourceLoader;
-import io.smallrye.common.resource.Resource;
+import io.github.dmlloyd.modules.desc.PackageAccess;
 import io.smallrye.common.resource.ResourceLoader;
 
 /**
@@ -18,45 +14,16 @@ import io.smallrye.common.resource.ResourceLoader;
 final class JarFileModuleFinder implements ModuleFinder {
     private final ResourceLoader jarLoader;
     private final ModuleDescriptor descriptor;
+    private final ResourceLoaderOpener opener;
 
-    JarFileModuleFinder(final ResourceLoader jarLoader, final String name) throws IOException {
+    JarFileModuleFinder(final ResourceLoader jarLoader, final String name, final Map<String, Map<String, PackageAccess>> extraAccesses) throws IOException {
         this.jarLoader = jarLoader;
-        descriptor = computeModuleDesc(jarLoader, name);
+        descriptor = ModuleDescriptorLoader.basic(extraAccesses).loadDescriptor(name, List.of(jarLoader));
+        opener = ResourceLoaderOpener.forLoader(jarLoader);
     }
 
-    JarFileModuleFinder(final Path jarPath) throws IOException {
-        this(new JarFileResourceLoader(jarPath), jarPath.getFileName().toString());
-    }
-
-    ModuleDescriptor computeModuleDesc(ResourceLoader loader, String name) throws IOException {
-        // compute a default name
-        TextIter nameIter = TextIter.of(name);
-        String defaultName = Util.autoModuleName(nameIter);
-        String defaultVersion = nameIter.hasNext() ? nameIter.substring() : null;
-        if (defaultVersion != null
-            && defaultVersion.endsWith("ar")
-            && Character.isLetter(defaultVersion.charAt(defaultVersion.length() - 3))
-            && defaultVersion.charAt(defaultVersion.length() - 4) == '.'
-        ) {
-            defaultVersion = defaultVersion.substring(0, defaultVersion.length() - 4);
-        }
-        List<ResourceLoader> loaderAsList = List.of(loader);
-        // first, try for module-info
-        Resource moduleInfo = loader.findResource("module-info.class");
-        if (moduleInfo != null) {
-            return ModuleDescriptor.fromModuleInfo(moduleInfo, loaderAsList);
-        }
-        // try to construct a descriptor from the manifest
-        return ModuleDescriptor.fromManifest(
-            defaultName,
-            defaultVersion,
-            Objects.requireNonNullElseGet(loader.manifest(), Manifest::new),
-            loaderAsList
-        );
-    }
-
-    public ModuleDescriptor findModule(final String name) {
-        return name.equals(descriptor.name()) ? descriptor : null;
+    public FoundModule findModule(final String name) {
+        return name.equals(descriptor.name()) ? new FoundModule(List.of(opener), (moduleName, loaders) -> descriptor) : null;
     }
 
     public void close() {

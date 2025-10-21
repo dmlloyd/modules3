@@ -776,16 +776,16 @@ public class ModuleClassLoader extends ClassLoader {
                 switch (entry.getValue()) {
                     case EXPORTED -> {
                         if (lm.classLoader() instanceof ModuleClassLoader mcl) {
-                            mcl.linkDefined().addExports(entry.getKey(), module);
+                            mcl.linkDefined().addExports(entry.getKey(), module());
                         } else {
-                            Util.addExports(lm.module(), entry.getKey(), module);
+                            Util.addExports(module, entry.getKey(), module());
                         }
                     }
                     case OPEN -> {
                         if (lm.classLoader() instanceof ModuleClassLoader mcl) {
-                            mcl.linkDefined().addOpens(entry.getKey(), module);
+                            mcl.linkDefined().addOpens(entry.getKey(), module());
                         } else {
-                            Util.addOpens(lm.module(), entry.getKey(), module);
+                            Util.addOpens(module, entry.getKey(), module());
                         }
                     }
                 }

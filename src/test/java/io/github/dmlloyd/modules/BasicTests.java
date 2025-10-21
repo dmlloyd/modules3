@@ -23,24 +23,18 @@ public final class BasicTests {
     @Test
     public void basics() throws ClassNotFoundException {
         ModuleLoader ml = new DelegatingModuleLoader("test", new ModuleFinder() {
-            public ModuleDescriptor findModule(final String name) {
-                return name.equals("hello") ? new ModuleDescriptor(
+            public FoundModule findModule(final String name) {
+                return name.equals("hello") ? new FoundModule(List.of(), (moduleName, loaders) -> new ModuleDescriptor(
                     "hello",
                     Optional.of("1.2.3"),
                     Modifiers.of(),
-                    Optional.of("test"),
+                    Optional.of("test.foobar.Main"),
                     Optional.empty(),
-                    List.of(
-                        new Dependency(
-                            "java.base",
-                            Modifiers.of(Dependency.Modifier.MANDATED, Dependency.Modifier.SYNTHETIC),
-                            Optional.empty()
-                        )
-                    ),
+                    List.of(Dependency.JAVA_BASE),
                     Set.of(RandomGenerator.class.getName(), "java.lang.Unknown"),
                     Map.of("java.lang.Nothing", List.of("test.foobar.NonExistent")),
                     Map.of("test.foobar", PackageInfo.EXPORTED, "test.foobar.impl", PackageInfo.PRIVATE)
-                ) : null;
+                )) : null;
             }
         }, ModuleLoader.BOOT);
         LoadedModule resolved = ml.loadModule("hello");

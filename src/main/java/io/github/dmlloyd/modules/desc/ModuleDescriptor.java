@@ -267,6 +267,22 @@ public record ModuleDescriptor(
         Resource moduleInfo,
         List<ResourceLoader> resourceLoaders
     ) throws IOException {
+        return fromModuleInfo(moduleInfo, resourceLoaders, Map.of());
+    }
+
+    /**
+     * Obtain a module descriptor from a {@code module-info.class} file's contents.
+     *
+     * @param moduleInfo the bytes of the {@code module-info.class} (must not be {@code null})
+     * @param resourceLoaders the loaders from which packages may be discovered if not given in the descriptor (must not be {@code null})
+     * @param extraAccesses extra package accesses to merge into dependencies (must not be {@code null})
+     * @return the module descriptor (not {@code null})
+     */
+    public static ModuleDescriptor fromModuleInfo(
+        Resource moduleInfo,
+        List<ResourceLoader> resourceLoaders,
+        Map<String, Map<String, PackageAccess>> extraAccesses
+    ) throws IOException {
         ClassModel classModel;
         try (InputStream is = moduleInfo.openStream()) {
             classModel = ClassFile.of().parse(is.readAllBytes());
@@ -338,8 +354,9 @@ public record ModuleDescriptor(
             .map(String::intern)
             .forEach(name -> packagesMap.putIfAbsent(name, PackageInfo.PRIVATE))
         );
+        String moduleName = ma.moduleName().name().stringValue();
         ModuleDescriptor desc = new ModuleDescriptor(
-            ma.moduleName().name().stringValue(),
+            moduleName,
             ma.moduleVersion().map(Utf8Entry::stringValue),
             mods,
             mca.map(ModuleMainClassAttribute::mainClass)
@@ -352,7 +369,8 @@ public record ModuleDescriptor(
                 r -> new Dependency(
                     r.requires().name().stringValue(),
                     toModifiers(r.requiresFlags()),
-                    Optional.empty()
+                    Optional.empty(),
+                    extraAccesses.getOrDefault(r.requires().name().stringValue(), Map.of())
                 )
             ).toList(),
             ma.uses().stream()
@@ -429,6 +447,10 @@ public record ModuleDescriptor(
     }
 
     public static ModuleDescriptor fromManifest(String defaultName, String defaultVersion, Manifest manifest, List<ResourceLoader> resourceLoaders) throws IOException {
+        return fromManifest(defaultName, defaultVersion, manifest, resourceLoaders, Map.of());
+    }
+
+    public static ModuleDescriptor fromManifest(String defaultName, String defaultVersion, Manifest manifest, List<ResourceLoader> resourceLoaders, Map<String, Map<String, PackageAccess>> extraAccesses) throws IOException {
         var mainAttributes = manifest.getMainAttributes();
         String moduleName = mainAttributes.getValue("Automatic-Module-Name");
         String version = mainAttributes.getValue("Module-Version");
@@ -470,8 +492,11 @@ public record ModuleDescriptor(
                 Map<String, PackageAccess> accesses;
                 if (addOpens.containsKey(depName) || addExports.containsKey(depName)) {
                     accesses = Stream.concat(
-                        addExports.get(depName).stream().map(pkg -> Map.entry(pkg, PackageAccess.EXPORTED)),
-                        addOpens.get(depName).stream().map(pkg -> Map.entry(pkg, PackageAccess.OPEN))
+                        Stream.concat(
+                            addExports.get(depName).stream().map(pkg -> Map.entry(pkg, PackageAccess.EXPORTED)),
+                            addOpens.get(depName).stream().map(pkg -> Map.entry(pkg, PackageAccess.OPEN))
+                        ),
+                        extraAccesses.getOrDefault(depName, Map.of()).entrySet().stream()
                     ).collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue, PackageAccess::max));
                 } else {
                     accesses = Map.of();

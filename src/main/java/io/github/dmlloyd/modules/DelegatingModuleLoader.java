@@ -18,7 +18,7 @@ public final class DelegatingModuleLoader extends ModuleLoader {
      * @param delegateFn the function which yields the delegate to use when the module is not found (must not be {@code null})
      */
     public DelegatingModuleLoader(final String name, final ModuleFinder moduleFinder, final Function<String, ModuleLoader> delegateFn) {
-        super(name);
+        super(name, moduleFinder);
         this.delegateFn = Assert.checkNotNullParam("delegateFn", delegateFn);
     }
 
@@ -34,16 +34,15 @@ public final class DelegatingModuleLoader extends ModuleLoader {
         Assert.checkNotNullParam("delegate", delegate);
     }
 
-    protected ModuleClassLoader findModule(final String moduleName) {
-        ModuleClassLoader loader = findDefinedModule(moduleName);
-        if (loader != null) {
-            return loader;
-        } else {
-            ModuleLoader delegate = delegateFn.apply(moduleName);
-            if (delegate == null) {
-                return null;
-            }
-            return delegate.findModule(moduleName);
+    public LoadedModule loadModule(final String moduleName) {
+        LoadedModule loadedModule = super.loadModule(moduleName);
+        if (loadedModule != null) {
+            return loadedModule;
         }
+        ModuleLoader delegate = delegateFn.apply(moduleName);
+        if (delegate == null) {
+            return null;
+        }
+        return delegate.loadModule(moduleName);
     }
 }

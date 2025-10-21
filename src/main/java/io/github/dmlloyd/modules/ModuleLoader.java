@@ -13,6 +13,7 @@ import io.smallrye.common.constraint.Assert;
  */
 public class ModuleLoader implements Closeable {
     private final String name;
+    private final ModuleFinder finder;
     private final ReentrantLock defineLock = new ReentrantLock();
     private final ConcurrentHashMap<String, DefinedModule> definedModules = new ConcurrentHashMap<>();
     private volatile boolean closed;
@@ -21,9 +22,20 @@ public class ModuleLoader implements Closeable {
      * Construct a new instance.
      *
      * @param name the module loader's name (must not be {@code null})
+     * @param finder the module finder (must not be {@code null})
+     */
+    public ModuleLoader(final String name, final ModuleFinder finder) {
+        this.name = Assert.checkNotNullParam("name", name);
+        this.finder = Assert.checkNotNullParam("finder", finder);
+    }
+
+    /**
+     * Construct a new instance with no module finder.
+     *
+     * @param name the module loader's name (must not be {@code null})
      */
     public ModuleLoader(final String name) {
-        this.name = Assert.checkNotNullParam("name", name);
+        this(name, ModuleFinder.EMPTY);
     }
 
     /**
@@ -42,6 +54,9 @@ public class ModuleLoader implements Closeable {
      */
     public LoadedModule loadModule(final String moduleName) {
         checkClosed();
+        if (moduleName.equals("java.base")) {
+            return BASE.loadModule("java.base");
+        }
         ModuleClassLoader loaded = findDefinedModule(moduleName);
         if (loaded == null) {
             loaded = findModule(moduleName);
@@ -101,6 +116,14 @@ public class ModuleLoader implements Closeable {
      * @return the module, or {@code null} if the module is not found within this loader
      */
     protected ModuleClassLoader findModule(String moduleName) {
+        FoundModule foundModule = finder.findModule(moduleName);
+        if (foundModule != null) {
+            ModuleClassLoader result = tryDefineModule(moduleName, foundModule.loaderOpeners(), foundModule.descriptorLoader());
+            if (result == null) {
+                result = findDefinedModule(moduleName);
+            }
+            return result;
+        }
         return null;
     }
 
@@ -181,7 +204,7 @@ public class ModuleLoader implements Closeable {
 
     public static ModuleLoader aggregate(String name, List<ModuleLoader> loaders) {
         List<ModuleLoader> copy = List.copyOf(loaders);
-        return new ModuleLoader(name) {
+        return new ModuleLoader(name, ModuleFinder.EMPTY) {
             public LoadedModule loadModule(final String moduleName) {
                 LoadedModule found = super.loadModule(moduleName);
                 if (found != null) {
@@ -202,9 +225,9 @@ public class ModuleLoader implements Closeable {
         return aggregate(name, List.of(loaders));
     }
 
-    public static final ModuleLoader EMPTY = new ModuleLoader("empty");
+    public static final ModuleLoader EMPTY = new ModuleLoader("empty", ModuleFinder.EMPTY);
 
-    public static final ModuleLoader BASE = new ModuleLoader("java.base") {
+    public static final ModuleLoader BASE = new ModuleLoader("java.base", ModuleFinder.EMPTY) {
         private static final Module javaBase = Object.class.getModule();
         private static final LoadedModule loadedJavaBase = LoadedModule.forModule(javaBase);
 
@@ -220,7 +243,7 @@ public class ModuleLoader implements Closeable {
     public static final ModuleLoader BOOT = forLayer("boot", ModuleLayer.boot());
 
     public static ModuleLoader forLayer(String name, ModuleLayer layer) {
-        return new ModuleLoader(name) {
+        return new ModuleLoader(name, ModuleFinder.EMPTY) {
             public LoadedModule loadModule(final String moduleName) {
                 return layer.findModule(moduleName).map(LoadedModule::forModule).orElse(null);
             }

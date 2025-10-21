@@ -18,8 +18,6 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.smallrye.common.resource.JarFileResourceLoader;
-import io.smallrye.common.resource.PathResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
 
@@ -27,14 +25,14 @@ import io.smallrye.common.resource.ResourceLoader;
  * A module definition finder.
  */
 public interface ModuleFinder extends Closeable {
-    ModuleDescriptor findModule(String name);
+    FoundModule findModule(String name);
 
     default ModuleFinder andThen(ModuleFinder other) {
         if (this == EMPTY) {
             return other;
         }
         return name -> {
-            ModuleDescriptor res = findModule(name);
+            var res = findModule(name);
             return res != null ? res : other.findModule(name);
         };
     }
@@ -47,7 +45,7 @@ public interface ModuleFinder extends Closeable {
         List<Path> paths = List.copyOf(roots);
         return new ModuleFinder() {
 
-            public ModuleDescriptor findModule(final String name) {
+            public FoundModule findModule(final String name) {
                 interface XMLCloser extends AutoCloseable {
                     void close() throws XMLStreamException;
                 }
@@ -95,33 +93,29 @@ public interface ModuleFinder extends Closeable {
                             // ensure consistent behavior across file systems
                             items.sort(Comparator.comparing(p -> p.getFileName().toString()));
                         }
-                        List<ResourceLoader> resourceLoaders = new ArrayList<>(items.size());
-                        try {
-                            for (Path item : items) {
-                                PathResource pr = new PathResource(item.toString(), item);
-                                try {
-                                    resourceLoaders.add(new JarFileResourceLoader(pr));
-                                } catch (IOException e) {
-                                    throw new ModuleLoadException("Failed to open JAR file", e);
-                                }
-                            }
+                        List<ResourceLoaderOpener> openers = new ArrayList<>(items.size());
+                        for (Path item : items) {
+                            openers.add(ResourceLoaderOpener.forJarFile(item));
+                        }
+                        final Path finalModuleXml = moduleXml;
+                        return new FoundModule(openers, (moduleName, loaders) -> {
                             // now, find the module descriptor
-                            if (moduleXml != null) {
-                                try (BufferedReader br = Files.newBufferedReader(moduleXml, StandardCharsets.UTF_8)) {
+                            if (finalModuleXml != null) {
+                                try (BufferedReader br = Files.newBufferedReader(finalModuleXml, StandardCharsets.UTF_8)) {
                                     XMLStreamReader xml = XMLInputFactory.newDefaultFactory().createXMLStreamReader(br);
                                     try (XMLCloser ignored = xml::close) {
                                         return ModuleDescriptor.fromXml(xml);
                                     }
                                 } catch (XMLStreamException | IOException e) {
-                                    throw new ModuleLoadException("Failed to read " + moduleXml, e);
+                                    throw new ModuleLoadException("Failed to read " + finalModuleXml, e);
                                 }
                             }
-                            for (ResourceLoader resourceLoader : resourceLoaders) {
+                            for (ResourceLoader resourceLoader : loaders) {
                                 Resource resource;
                                 try {
                                     resource = resourceLoader.findResource("module-info.class");
                                     if (resource != null) {
-                                        return ModuleDescriptor.fromModuleInfo(resource, resourceLoaders);
+                                        return ModuleDescriptor.fromModuleInfo(resource, loaders);
                                     }
                                 } catch (NoSuchFileException | FileNotFoundException ignored) {
                                     // just try the next one
@@ -129,17 +123,8 @@ public interface ModuleFinder extends Closeable {
                                     throw new ModuleLoadException("Failed to load module descriptor", e);
                                 }
                             }
-                            throw new ModuleLoadException("No JARs in " + realPath + " contain a module descriptor");
-                        } catch (Throwable t) {
-                            for (ResourceLoader resourceLoader : resourceLoaders) {
-                                try {
-                                    resourceLoader.close();
-                                } catch (Throwable t2) {
-                                    t.addSuppressed(t2);
-                                }
-                            }
-                            throw t;
-                        }
+                            throw new ModuleLoadException("No JARs contain a module descriptor");
+                        });
                     }
                 }
                 // no valid module found

@@ -11,6 +11,7 @@ import java.lang.module.ModuleReference;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.security.AllPermission;
 import java.security.PermissionCollection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -51,7 +52,7 @@ final class Util {
             moduleLayerBindToLoader = lookup.findVirtual(ModuleLayer.class, "bindToLoader", MethodType.methodType(void.class, ClassLoader.class)).asType(MethodType.methodType(void.class, ModuleLayer.class, ModuleClassLoader.class));
         } catch (NoSuchMethodException e) {
             throw toError(e);
-        } catch (IllegalAccessException e) {
+        } catch (IllegalAccessException | IllegalAccessError e) {
             IllegalAccessError error = new IllegalAccessError(e.getMessage() + " -- use: --add-exports java.base/jdk.internal.module=" + myModule.getName());
             error.setStackTrace(e.getStackTrace());
             throw error;
@@ -162,6 +163,10 @@ final class Util {
         var error = new NoSuchMethodError(e.getMessage());
         error.setStackTrace(e.getStackTrace());
         return error;
+    }
+
+    static <K, V> Map<K, V> newHashMap(Object ignored) {
+        return new HashMap<>();
     }
 }
 
