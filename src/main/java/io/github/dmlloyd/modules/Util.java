@@ -62,11 +62,12 @@ final class Util {
             Module.class
         );
         // this one is flexible: it's only since Java 22 (otherwise, ignore)
-        MethodHandle h;
+        MethodHandle h = MethodHandles.empty(methodType);
         try {
-            h = privateLookupIn(ModuleLayer.Controller.class, lookup()).findVirtual(ModuleLayer.Controller.class, "enableNativeAccess", methodType);
+            if (Runtime.version().feature() >= 22) {
+                h = privateLookupIn(ModuleLayer.Controller.class, lookup()).findVirtual(ModuleLayer.Controller.class, "enableNativeAccess", methodType);
+            }
         } catch (NoSuchMethodException | IllegalAccessException ignored) {
-            h = MethodHandles.empty(methodType);
         }
         enableNativeAccess = h;
     }
