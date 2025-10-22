@@ -41,6 +41,7 @@ import io.github.dmlloyd.classfile.constantpool.Utf8Entry;
 import io.github.dmlloyd.classfile.extras.reflect.AccessFlag;
 import io.github.dmlloyd.modules.NativeAccess;
 import io.github.dmlloyd.modules.impl.TextIter;
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.constraint.Assert;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -388,7 +389,7 @@ public record ModuleDescriptor(
                         .map(s -> s.replace('/', '.'))
                         .map(String::intern)
                         .toList())
-            ).collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue)),
+            ).collect(Util.toMap()),
             packagesMap
         );
         if (mpa.isEmpty()) {

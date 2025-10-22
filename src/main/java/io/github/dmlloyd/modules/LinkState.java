@@ -1,6 +1,6 @@
 package io.github.dmlloyd.modules;
 
-import static io.github.dmlloyd.modules.Util.*;
+import static io.github.dmlloyd.modules.impl.Util.*;
 
 import java.net.URI;
 import java.security.CodeSigner;
@@ -15,6 +15,7 @@ import io.github.dmlloyd.modules.desc.Dependency;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageInfo;
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
 
@@ -182,7 +183,7 @@ abstract class LinkState {
 
         void addProvider(final Class<?> service, final Class<?> impl) {
             if (layerController != null) {
-                Util.addProvides(module, service, impl);
+                addProvides(module, service, impl);
             }
         }
 

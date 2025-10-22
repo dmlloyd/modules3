@@ -26,6 +26,7 @@ import java.util.stream.Stream;
 
 import io.github.dmlloyd.modules.desc.Dependency;
 import io.github.dmlloyd.modules.desc.PackageAccess;
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.constraint.Assert;
 import io.smallrye.common.resource.JarFileResourceLoader;
 

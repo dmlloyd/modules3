@@ -2,6 +2,7 @@ package io.github.dmlloyd.modules.desc;
 
 import java.util.Set;
 
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.constraint.Assert;
 
 /**

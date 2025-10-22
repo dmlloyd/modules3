@@ -6,6 +6,8 @@ import java.util.Map;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageAccess;
+import io.github.dmlloyd.modules.impl.TextIter;
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.resource.ResourceLoader;
 
 /**
@@ -18,7 +20,7 @@ final class JarFileModuleFinder implements ModuleFinder {
 
     JarFileModuleFinder(final ResourceLoader jarLoader, final String name, final Map<String, Map<String, PackageAccess>> extraAccesses) throws IOException {
         this.jarLoader = jarLoader;
-        descriptor = ModuleDescriptorLoader.basic(extraAccesses).loadDescriptor(name, List.of(jarLoader));
+        descriptor = ModuleDescriptorLoader.basic(extraAccesses).loadDescriptor(Util.autoModuleName(TextIter.of(name)), List.of(jarLoader));
         opener = ResourceLoaderOpener.forLoader(jarLoader);
     }
 

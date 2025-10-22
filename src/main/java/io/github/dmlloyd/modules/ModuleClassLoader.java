@@ -42,6 +42,7 @@ import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageAccess;
 import io.github.dmlloyd.modules.desc.PackageInfo;
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.resource.MemoryResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -59,7 +60,7 @@ public class ModuleClassLoader extends ClassLoader {
 
     private static final Map<String, Module> bootModuleIndex = ModuleLayer.boot().modules().stream()
         .flatMap(m -> m.getPackages().stream().filter(p -> m.isExported(p, Util.myModule)).map(p -> Map.entry(p, m)))
-        .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
+        .collect(Util.toMap());
 
     private final String moduleName;
     private final String moduleVersion;
