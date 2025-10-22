@@ -163,8 +163,12 @@ public final class Util {
                 // version starts here
                 return sb.toString();
             } else if (! dot) {
+                iter.next();
                 dot = true;
                 sb.append('.');
+            } else {
+                // skip
+                iter.next();
             }
         }
         // no version
