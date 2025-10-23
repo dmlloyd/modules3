@@ -373,7 +373,7 @@ public record ModuleDescriptor(
                     Optional.empty(),
                     extraAccesses.getOrDefault(r.requires().name().stringValue(), Map.of())
                 )
-            ).toList(),
+            ).collect(Util.toList()),
             ma.uses().stream()
                 .map(ClassEntry::name)
                 .map(Utf8Entry::stringValue)
@@ -388,7 +388,7 @@ public record ModuleDescriptor(
                         .map(Utf8Entry::stringValue)
                         .map(s -> s.replace('/', '.'))
                         .map(String::intern)
-                        .toList())
+                        .collect(Util.toList()))
             ).collect(Util.toMap()),
             packagesMap
         );
@@ -396,55 +396,6 @@ public record ModuleDescriptor(
             desc = desc.withDiscoveredPackages(resourceLoaders);
         }
         return desc;
-    }
-
-    private static <E> HashSet<E> newHashSet(Object ignored) {
-        return new HashSet<>();
-    }
-
-    private static Map<String, Set<String>> parseManifestAdd(String value) {
-        if (value == null) {
-            return Map.of();
-        }
-        Map<String, Set<String>> map = Map.of();
-        TextIter iter = TextIter.of(value);
-        iter.skipWhiteSpace();
-        while (iter.hasNext()) {
-            String moduleName = dotName(iter);
-            if (iter.peekNext() != '/') {
-                throw invalidChar(value, iter.peekNext(), iter.position());
-            }
-            iter.next(); // consume /
-            String packageName = dotName(iter);
-            if (map.isEmpty()) {
-                map = new LinkedHashMap<>();
-            }
-            map.computeIfAbsent(moduleName, ModuleDescriptor::newHashSet).add(packageName);
-            iter.skipWhiteSpace();
-        }
-        return map;
-    }
-
-    private static IllegalArgumentException invalidChar(final String str, final int cp, final int idx) {
-        return new IllegalArgumentException("Invalid character '%s' at index %d of \"%s\"".formatted(Character.toString(cp), Integer.valueOf(idx), str));
-    }
-
-    private static String dotName(TextIter iter) {
-        int cp = iter.peekNext();
-        if (Character.isJavaIdentifierStart(cp)) {
-            int start = iter.position();
-            iter.next(); // consume
-            while (iter.hasNext()) {
-                cp = iter.peekNext();
-                if (! Character.isJavaIdentifierPart(cp)) {
-                    // done
-                    return iter.substring(start);
-                }
-            }
-            // end of string
-            return iter.substring(start);
-        }
-        throw invalidChar(iter.text(), cp, iter.position());
     }
 
     public static ModuleDescriptor fromManifest(String defaultName, String defaultVersion, Manifest manifest, List<ResourceLoader> resourceLoaders) throws IOException {
@@ -544,6 +495,55 @@ public record ModuleDescriptor(
             }
             default -> throw unexpectedContent(xml);
         }
+    }
+
+    private static <E> HashSet<E> newHashSet(Object ignored) {
+        return new HashSet<>();
+    }
+
+    private static Map<String, Set<String>> parseManifestAdd(String value) {
+        if (value == null) {
+            return Map.of();
+        }
+        Map<String, Set<String>> map = Map.of();
+        TextIter iter = TextIter.of(value);
+        iter.skipWhiteSpace();
+        while (iter.hasNext()) {
+            String moduleName = dotName(iter);
+            if (iter.peekNext() != '/') {
+                throw invalidChar(value, iter.peekNext(), iter.position());
+            }
+            iter.next(); // consume /
+            String packageName = dotName(iter);
+            if (map.isEmpty()) {
+                map = new LinkedHashMap<>();
+            }
+            map.computeIfAbsent(moduleName, ModuleDescriptor::newHashSet).add(packageName);
+            iter.skipWhiteSpace();
+        }
+        return map;
+    }
+
+    private static IllegalArgumentException invalidChar(final String str, final int cp, final int idx) {
+        return new IllegalArgumentException("Invalid character '%s' at index %d of \"%s\"".formatted(Character.toString(cp), Integer.valueOf(idx), str));
+    }
+
+    private static String dotName(TextIter iter) {
+        int cp = iter.peekNext();
+        if (Character.isJavaIdentifierStart(cp)) {
+            int start = iter.position();
+            iter.next(); // consume
+            while (iter.hasNext()) {
+                cp = iter.peekNext();
+                if (! Character.isJavaIdentifierPart(cp)) {
+                    // done
+                    return iter.substring(start);
+                }
+            }
+            // end of string
+            return iter.substring(start);
+        }
+        throw invalidChar(iter.text(), cp, iter.position());
     }
 
     private static ModuleDescriptor parseModuleElement(final XMLStreamReader xml) throws XMLStreamException {

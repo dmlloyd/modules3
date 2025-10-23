@@ -11,6 +11,9 @@ import java.lang.module.ModuleReference;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.security.AllPermission;
 import java.security.PermissionCollection;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -189,6 +192,10 @@ public final class Util {
         return Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue);
     }
 
+    public static <E> Collector<E, ?, List<E>> toList() {
+        return Collectors.toUnmodifiableList();
+    }
+
     public static <E> Set<E> merge(Set<E> set1, Set<E> set2) {
         if (set1 == null || set1.isEmpty()) {
             return set2;
@@ -205,7 +212,7 @@ public final class Util {
         } else if (list2 == null || list2.isEmpty()) {
             return list1;
         } else {
-            return Stream.concat(list1.stream(), list2.stream()).toList();
+            return Stream.concat(list1.stream(), list2.stream()).collect(toList());
         }
     }
 

@@ -431,7 +431,7 @@ public class ModuleClassLoader extends ClassLoader {
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
                 }
-            }).filter(Objects::nonNull).toList();
+            }).filter(Objects::nonNull).collect(Util.toList());
         } catch (UncheckedIOException e) {
             throw e.getCause();
         }
@@ -584,7 +584,7 @@ public class ModuleClassLoader extends ClassLoader {
                 }
             })
             .filter(Objects::nonNull)
-            .toList();
+            .collect(Util.toList());
         return doLocked(ModuleClassLoader::linkDependenciesLocked, loadedDependencies);
     }
 
@@ -953,7 +953,7 @@ public class ModuleClassLoader extends ClassLoader {
             ));
             zb.with(ModulePackagesAttribute.of(linkOpened().packages().keySet().stream()
                 .map(n -> zb.constantPool().packageEntry(PackageDesc.of(n)))
-                .toList()
+                .collect(Util.toList())
             ));
         });
         return new MemoryResource("module-info.class", bytes);

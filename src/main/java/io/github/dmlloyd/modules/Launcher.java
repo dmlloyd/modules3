@@ -326,7 +326,7 @@ public final class Launcher implements Runnable {
                         System.err.flush();
                         return 1;
                     }
-                    modulePath = Stream.of(iterator.next().split(File.pathSeparator)).map(Path::of).toList();
+                    modulePath = Stream.of(iterator.next().split(File.pathSeparator)).map(Path::of).collect(Util.toList());
                 }
                 case "--jar" -> {
                     if (mode != Mode.MODULE) {

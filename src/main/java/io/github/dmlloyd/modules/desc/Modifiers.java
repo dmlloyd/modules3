@@ -4,6 +4,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.stream.IntStream;
 
+import io.github.dmlloyd.modules.impl.Util;
+
 /**
  * A set of modifiers.
  */
@@ -15,7 +17,7 @@ public final class Modifiers<M extends Enum<M> & ModifierFlag> {
         this.flags = flags;
     }
 
-    private static final List<?> allValues = IntStream.range(0, 64).mapToObj(Modifiers::new).toList();
+    private static final List<?> allValues = IntStream.range(0, 64).mapToObj(Modifiers::new).collect(Util.toList());
 
     @SuppressWarnings("unchecked")
     public static <M extends Enum<M> & ModifierFlag> Modifiers<M> of() {
