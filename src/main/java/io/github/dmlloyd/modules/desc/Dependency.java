@@ -112,9 +112,24 @@ public record Dependency(
      * Modifiers for dependencies.
      */
     public enum Modifier implements ModifierFlag {
+        /**
+         * The dependency is synthetic.
+         * Synthetic dependencies are added by frameworks.
+         */
         SYNTHETIC,
+        /**
+         * The dependency is mandated by specification.
+         */
         MANDATED,
+        /**
+         * The dependency is optional.
+         * If it is not found when the module is linked, do not fail.
+         */
         OPTIONAL,
+        /**
+         * The dependency is transitive, which is to say that a dependency
+         * on the module containing this dependency implies a dependency on the target as well.
+         */
         TRANSITIVE,
         ;
 

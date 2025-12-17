@@ -7,6 +7,8 @@ import io.smallrye.common.constraint.Assert;
 
 /**
  * Information about a package in the module.
+ * Note that export and open targets are only recognized when the target module directly requires the module containing
+ * the package described by this information.
  *
  * @param packageAccess the outbound access level of the package (must not be {@code null})
  * @param exportTargets specific export targets in addition to those implied by {@link #packageAccess()} or {@link #openTargets()} (must not be {@code null})

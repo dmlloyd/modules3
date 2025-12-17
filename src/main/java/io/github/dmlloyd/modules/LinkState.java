@@ -34,7 +34,7 @@ abstract class LinkState {
         static final Closed INSTANCE = new Closed();
     }
 
-    static class Loaded extends LinkState {
+    static class New extends LinkState {
         private final String moduleVersion;
         private final String mainClass;
         private final List<Dependency> dependencies;
@@ -45,7 +45,7 @@ abstract class LinkState {
         private final Map<String, List<String>> provides;
         private final URI location;
 
-        Loaded(final String moduleVersion, final String mainClass, final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Map<String, PackageInfo> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Map<String, List<String>> provides, final URI location) {
+        New(final String moduleVersion, final String mainClass, final List<Dependency> dependencies, final List<ResourceLoader> resourceLoaders, final Map<String, PackageInfo> packages, final Modifiers<ModuleDescriptor.Modifier> modifiers, final Set<String> uses, final Map<String, List<String>> provides, final URI location) {
             this.moduleVersion = moduleVersion;
             this.mainClass = mainClass;
             this.dependencies = dependencies;
@@ -57,7 +57,7 @@ abstract class LinkState {
             this.location = location;
         }
 
-        Loaded(final Loaded other) {
+        New(final New other) {
             this(other.moduleVersion, other.mainClass, other.dependencies, other.resourceLoaders, other.packages, other.modifiers, other.uses, other.provides, other.location);
         }
 
@@ -90,10 +90,10 @@ abstract class LinkState {
         }
     }
 
-    static class Dependencies extends Loaded {
-        private final List<LoadedModule> loadedDependencies;
+    static class Dependencies extends New {
+        private final List<LoadedDependency> loadedDependencies;
 
-        Dependencies(final Loaded other, final List<LoadedModule> loadedDependencies) {
+        Dependencies(final New other, final List<LoadedDependency> loadedDependencies) {
             super(other);
             this.loadedDependencies = loadedDependencies;
         }
@@ -102,7 +102,7 @@ abstract class LinkState {
             this(other, other.loadedDependencies);
         }
 
-        List<LoadedModule> loadedDependencies() {
+        List<LoadedDependency> loadedDependencies() {
             return loadedDependencies;
         }
     }
@@ -206,9 +206,9 @@ abstract class LinkState {
     }
 
     static class Packages extends Defined {
-        private final Map<String, Module> modulesByPackage;
+        private final Map<String, LoadedModule> modulesByPackage;
 
-        Packages(Defined other, final Map<String, Module> modulesByPackage) {
+        Packages(Defined other, final Map<String, LoadedModule> modulesByPackage) {
             super(other);
             this.modulesByPackage = modulesByPackage;
         }
@@ -217,7 +217,7 @@ abstract class LinkState {
             this(other, other.modulesByPackage);
         }
 
-        Map<String, Module> modulesByPackage() {
+        Map<String, LoadedModule> modulesByPackage() {
             return modulesByPackage;
         }
     }

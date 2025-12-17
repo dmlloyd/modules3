@@ -345,7 +345,7 @@ public final class Launcher implements Runnable {
                     infoOnly = true;
                 }
                 case "--add-exports", "--add-opens" -> {
-                    // export to the boot module
+                    // export to the main module
                     // format: module/packageName
                     if (! iterator.hasNext()) {
                         System.err.printf("Option `%s` requires an argument%n", argument);

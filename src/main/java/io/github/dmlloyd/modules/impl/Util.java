@@ -11,9 +11,6 @@ import java.lang.module.ModuleReference;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.security.AllPermission;
 import java.security.PermissionCollection;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,9 +96,9 @@ public final class Util {
         enableNativeAccess = h;
     }
 
-    public static String packageName(String className) {
-        int idx = className.lastIndexOf('.');
-        return idx == -1 ? "" : className.substring(0, idx);
+    public static String packageName(String binaryName) {
+        int idx = binaryName.lastIndexOf('.');
+        return idx == -1 ? "" : binaryName.substring(0, idx);
     }
 
     public static String resourcePackageName(String resourcePath) {
