@@ -424,7 +424,7 @@ public record ModuleDescriptor(
             iter.skipWhiteSpace();
             while (iter.hasNext()) {
                 String depName = dotName(iter);
-                Modifiers<Dependency.Modifier> mods = Modifiers.of();
+                Modifiers<Dependency.Modifier> mods = Modifiers.of(Dependency.Modifier.SERVICES);
                 iter.skipWhiteSpace();
                 while (iter.hasNext()) {
                     if (iter.peekNext() == ',') {
@@ -638,7 +638,7 @@ public record ModuleDescriptor(
 
     private static Dependency parseDependencyElement(final XMLStreamReader xml) throws XMLStreamException {
         String name = null;
-        Modifiers<Dependency.Modifier> modifiers = Modifiers.of();
+        Modifiers<Dependency.Modifier> modifiers = Modifiers.of(Dependency.Modifier.SERVICES);
         Map<String, PackageAccess> packageAccesses = Map.of();
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
@@ -652,6 +652,16 @@ public record ModuleDescriptor(
                 case "optional" -> {
                     if (Boolean.parseBoolean(xml.getAttributeValue(i))) {
                         modifiers = modifiers.with(Dependency.Modifier.OPTIONAL);
+                    }
+                }
+                case "unlinked" -> {
+                    if (Boolean.parseBoolean(xml.getAttributeValue(i))) {
+                        modifiers = modifiers.with(Dependency.Modifier.UNLINKED);
+                    }
+                }
+                case "services" -> {
+                    if (! Boolean.parseBoolean(xml.getAttributeValue(i))) {
+                        modifiers = modifiers.without(Dependency.Modifier.SERVICES);
                     }
                 }
                 default -> throw unknownAttribute(xml, i);
@@ -987,7 +997,7 @@ public record ModuleDescriptor(
     }
 
     private static Modifiers<Dependency.Modifier> toModifiers(final Set<AccessFlag> accessFlags) {
-        Modifiers<Dependency.Modifier> mods = Modifiers.of();
+        Modifiers<Dependency.Modifier> mods = Modifiers.of(Dependency.Modifier.SERVICES);
         for (AccessFlag accessFlag : accessFlags) {
             switch (accessFlag) {
                 case STATIC_PHASE -> mods = mods.with(Dependency.Modifier.OPTIONAL);

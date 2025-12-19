@@ -77,6 +77,14 @@ public final class LoadedModule {
         }
     }
 
+    boolean isExported(String packageName, Module toModule) {
+        if (this.module != null) {
+            return this.module.isExported(packageName, toModule);
+        } else {
+            return moduleClassLoader.isExported(packageName, toModule);
+        }
+    }
+
     /**
      * {@return the optional name of the module}
      */
@@ -98,6 +106,10 @@ public final class LoadedModule {
 
     public int hashCode() {
         return Objects.hash(module, moduleClassLoader);
+    }
+
+    public String toString() {
+        return module != null ? String.valueOf(module) : moduleClassLoader.toString();
     }
 
     /**

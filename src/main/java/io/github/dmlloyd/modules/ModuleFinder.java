@@ -50,14 +50,7 @@ public interface ModuleFinder extends Closeable {
                     void close() throws XMLStreamException;
                 }
                 for (Path realPath : paths) {
-                    int idx = 0;
-                    int dot = name.indexOf('.');
-                    while (dot != -1) {
-                        realPath = realPath.resolve(name.substring(idx, dot));
-                        idx = dot + 1;
-                        dot = name.indexOf('.', idx);
-                    }
-                    realPath = realPath.resolve(name.substring(idx));
+                    realPath = realPath.resolve(name);
                     if (! Files.isDirectory(realPath)) {
                         return null;
                     }

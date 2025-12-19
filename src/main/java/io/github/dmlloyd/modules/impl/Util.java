@@ -78,7 +78,6 @@ public final class Util {
             throw error;
         }
         MethodType methodType = MethodType.methodType(
-            ModuleLayer.Controller.class,
             Module.class
         );
         MethodType toMethodType = MethodType.methodType(
@@ -89,7 +88,8 @@ public final class Util {
         MethodHandle h = MethodHandles.empty(toMethodType);
         try {
             if (Runtime.version().feature() >= 22) {
-                h = privateLookupIn(ModuleLayer.Controller.class, lookup()).findVirtual(ModuleLayer.Controller.class, "enableNativeAccess", methodType).asType(toMethodType);
+                //java.lang.Module.implAddEnableNativeAccess
+                h = privateLookupIn(Module.class, lookup()).findVirtual(Module.class, "implAddEnableNativeAccess", methodType).asType(toMethodType);
             }
         } catch (NoSuchMethodException | IllegalAccessException ignored) {
         }
@@ -122,12 +122,9 @@ public final class Util {
         Modules.addOpens(fromModule, packageName, toModule);
     }
 
-    public static void enableNativeAccess(final ModuleLayer.Controller ctl, final Module module) {
-        if (ctl == null) {
-            return;
-        }
+    public static void enableNativeAccess(final Module module) {
         try {
-            enableNativeAccess.invokeExact(ctl, module);
+            enableNativeAccess.invokeExact(module);
         } catch (RuntimeException | Error e) {
             throw e;
         } catch (Throwable t) {

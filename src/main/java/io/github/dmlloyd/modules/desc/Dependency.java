@@ -131,6 +131,15 @@ public record Dependency(
          * on the module containing this dependency implies a dependency on the target as well.
          */
         TRANSITIVE,
+        /**
+         * The dependency should not be linked for class loading.
+         * It will only be registered for reading.
+         */
+        UNLINKED,
+        /**
+         * The dependency will be examined for service implementations.
+         */
+        SERVICES,
         ;
 
         public static final List<Modifier> values = List.of(values());

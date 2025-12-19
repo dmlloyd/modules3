@@ -695,7 +695,7 @@ public class ModuleClassLoader extends ClassLoader {
             ModuleLayer moduleLayer = ctl.layer();
             Module module = moduleLayer.findModule(moduleName).orElseThrow(IllegalStateException::new);
             if (linkState.modifiers().contains(ModuleDescriptor.Modifier.NATIVE_ACCESS)) {
-                Util.enableNativeAccess(ctl, module);
+                Util.enableNativeAccess(module);
             }
             defined = new LinkState.Defined(
                 linkState,
@@ -720,7 +720,7 @@ public class ModuleClassLoader extends ClassLoader {
      */
     private void linkExportedPackages(LinkState.Defined linkState, LoadedModule loadedDependency, Map<String, LoadedModule> modulesByPackage, Set<LoadedModule> visited) {
         if (visited.add(loadedDependency)) {
-            linkState.addReads(loadedDependency.module());
+            System.out.println("Linking from " + linkState.module() + " to " + loadedDependency);
             Set<String> packages = loadedDependency.exportedPackageNames(linkState.module());
             for (String pkg : packages) {
                 modulesByPackage.putIfAbsent(pkg, loadedDependency);
@@ -785,6 +785,17 @@ public class ModuleClassLoader extends ClassLoader {
             }
             Module module = lm.module();
             linkState.addReads(module);
+            if (dependency.modifiers().contains(Dependency.Modifier.SERVICES)) {
+                // link up service loaders
+                ModuleLayer layer = module.getLayer();
+                if (layer != ModuleLayer.boot()) {
+                    registerLayer(layer);
+                }
+            }
+            if (dependency.modifiers().contains(Dependency.Modifier.UNLINKED)) {
+                // that's all we have to do
+                continue;
+            }
             // skip boot modules for memory efficiency
             if (! ModuleLayer.boot().modules().contains(module)) {
                 linkExportedPackages(linkState, lm, modulesByPackage, visited);
@@ -814,7 +825,7 @@ public class ModuleClassLoader extends ClassLoader {
         for (String pkg : linkState.packages().keySet()) {
             modulesByPackage.put(pkg, self);
         }
-        // link up directed exports and opens
+        // link up directed exports and opens (TODO: do this later when target module is loaded)
         for (Map.Entry<String, PackageInfo> entry : linkState.packages().entrySet()) {
             for (String target : entry.getValue().exportTargets()) {
                 LoadedModule resolved = moduleLoader().loadModule(target);
@@ -827,13 +838,6 @@ public class ModuleClassLoader extends ClassLoader {
                 if (resolved != null) {
                     linkState.addOpens(entry.getKey(), resolved.module());
                 }
-            }
-        }
-        // last, register service loader links
-        for (LoadedDependency ld : linkState.loadedDependencies()) {
-            ModuleLayer layer = ld.loadedModule().module().getLayer();
-            if (layer != ModuleLayer.boot()) {
-                registerLayer(layer);
             }
         }
         return doLocked(ModuleClassLoader::linkPackagesLocked, modulesByPackage);
@@ -1123,9 +1127,9 @@ public class ModuleClassLoader extends ClassLoader {
         lock.lock();
         try {
             // refresh under lock
-            if (linkState instanceof LinkState.New is) {
-                init = is;
-                linkState = LinkState.Closed.INSTANCE;
+            if (linkState instanceof LinkState.New newState) {
+                init = newState;
+                this.linkState = LinkState.Closed.INSTANCE;
             } else {
                 // it must be closed
                 return;
@@ -1151,11 +1155,19 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     Set<String> exportedPackageNames(Module toModule) {
-        LinkState.Packages packages = linkPackages();
-        return packages.packages().keySet().stream().filter(p -> {
-            LoadedModule fromModule = packages.modulesByPackage().get(p);
-            return fromModule != null && fromModule.module().isExported(p, toModule);
-        }).collect(Collectors.toUnmodifiableSet());
+        return linkNew().packages().keySet().stream().filter(p -> isExported(p, toModule))
+            .collect(Collectors.toUnmodifiableSet());
+    }
+
+    boolean isExported(String packageName, Module toModule) {
+        PackageInfo info = linkNew().packages().get(packageName);
+        if (info == null) {
+            return false;
+        }
+        if (info.packageAccess().isAtLeast(PackageAccess.EXPORTED)) {
+            return true;
+        }
+        return info.exportTargets().contains(toModule.getName());
     }
 
     public static final class ClassLoaderConfiguration {
