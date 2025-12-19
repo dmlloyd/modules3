@@ -627,6 +627,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }
+        System.out.println("Defining " + moduleName() + " with modifiers " + ModuleDescriptor.Modifier.toString(linkState.modifiers()));
         java.lang.module.ModuleDescriptor descriptor;
         if (linkState.modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
             descriptor = null;
@@ -720,6 +721,8 @@ public class ModuleClassLoader extends ClassLoader {
      */
     private void linkExportedPackages(LinkState.Defined linkState, LoadedModule loadedDependency, Map<String, LoadedModule> modulesByPackage, Set<LoadedModule> visited) {
         if (visited.add(loadedDependency)) {
+            // make sure that we read transitively imported dependencies
+            linkState.addReads(loadedDependency.module());
             System.out.println("Linking from " + linkState.module() + " to " + loadedDependency);
             Set<String> packages = loadedDependency.exportedPackageNames(linkState.module());
             for (String pkg : packages) {

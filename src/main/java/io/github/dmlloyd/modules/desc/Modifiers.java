@@ -2,6 +2,7 @@ package io.github.dmlloyd.modules.desc;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
 import io.github.dmlloyd.modules.impl.Util;
@@ -15,6 +16,24 @@ public final class Modifiers<M extends Enum<M> & ModifierFlag> {
 
     Modifiers(final int flags) {
         this.flags = flags;
+    }
+
+    public String toString(IntFunction<M> resolver) {
+        int flags = this.flags;
+        if (flags != 0) {
+            StringBuilder sb = new StringBuilder();
+            int hob = Integer.highestOneBit(flags);
+            sb.append(resolver.apply(Integer.numberOfTrailingZeros(hob)));
+            flags &= ~hob;
+            while (flags != 0) {
+                sb.append(' ');
+                hob = Integer.highestOneBit(flags);
+                sb.append(resolver.apply(Integer.numberOfTrailingZeros(hob)));
+                flags &= ~hob;
+            }
+            return sb.toString();
+        }
+        return "(none)";
     }
 
     private static final List<?> allValues = IntStream.range(0, 64).mapToObj(Modifiers::new).collect(Util.toList());

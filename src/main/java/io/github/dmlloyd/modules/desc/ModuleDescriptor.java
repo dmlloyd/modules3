@@ -255,6 +255,12 @@ public record ModuleDescriptor(
          * A module cannot be both automatic and unnamed.
          */
         UNNAMED,
+        ;
+        public static final List<Modifier> values = List.of(values());
+
+        public static String toString(Modifiers<Modifier> modifiers) {
+            return modifiers.toString(values::get);
+        }
     }
 
     /**
