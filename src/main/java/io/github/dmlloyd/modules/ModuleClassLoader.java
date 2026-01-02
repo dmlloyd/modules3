@@ -12,6 +12,7 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.ProtectionDomain;
+import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,6 +25,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
@@ -46,6 +48,7 @@ import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.resource.MemoryResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
+import io.smallrye.common.resource.ResourceUtils;
 import org.jboss.logging.Logger;
 
 /**
@@ -268,7 +271,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     public final Set<String> exportedPackages() {
-        return linkPackages().exportedPackages();
+        throw new UnsupportedOperationException("Not supported yet.");
     }
 
     /**
@@ -323,7 +326,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (pkgName.isEmpty() || ! linkDefined().packages().containsKey(pkgName)) {
             return resource;
         }
-        if (linkDefined().exportedPackages().contains(pkgName)) {
+        if (linkDefined().packages().getOrDefault(pkgName, PackageInfo.PRIVATE).packageAccess().isAtLeast(PackageAccess.EXPORTED)) {
             return resource;
         }
         if (module().isOpen(pkgName, caller.getModule())) {
@@ -349,7 +352,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (pkgName.isEmpty() || ! linkDefined().packages().containsKey(pkgName)) {
             return resources;
         }
-        if (linkDefined().exportedPackages().contains(pkgName)) {
+        if (linkDefined().packages().getOrDefault(pkgName, PackageInfo.PRIVATE).packageAccess().isAtLeast(PackageAccess.EXPORTED)) {
             return resources;
         }
         if (module().isOpen(pkgName, caller.getModule())) {
@@ -394,8 +397,8 @@ public class ModuleClassLoader extends ClassLoader {
         throw new ClassNotFoundException("Class `" + name + "` is not found in " + moduleName);
     }
 
-    final Resource loadResourceDirect(final String name) throws IOException {
-        // TODO: canonicalize
+    final Resource loadResourceDirect(String rawName) throws IOException {
+        String name = ResourceUtils.canonicalizeRelativePath(rawName);
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
             return loadModuleInfo();
@@ -416,14 +419,16 @@ public class ModuleClassLoader extends ClassLoader {
         return name.startsWith("META-INF/services/") && name.lastIndexOf('/') == 17;
     }
 
-    final List<Resource> loadResourcesDirect(final String name) throws IOException {
-        // TODO: canonicalize
+    final List<Resource> loadResourcesDirect(final String rawName) throws IOException {
+        String name = ResourceUtils.canonicalizeRelativePath(rawName);
         if (name.equals("module-info.class")) {
             // this is always loaded as a resource
-            return Optional.ofNullable(loadModuleInfo()).map(List::of).orElse(List.of());
+            Resource moduleInfo = loadModuleInfo();
+            return moduleInfo == null ? List.of() : List.of(moduleInfo);
         }
         if (isServiceFileName(name)) {
-            return Optional.ofNullable(loadServicesFileDirect(name)).map(List::of).orElse(List.of());
+            Resource resource = loadServicesFileDirect(name);
+            return resource == null ? List.of() : List.of(resource);
         }
         try {
             return linkNew().resourceLoaders().stream().map(l -> {
@@ -439,6 +444,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private Resource loadServicesFileDirect(final String name) {
+        // TODO: do not auto-generate service files? (think about logmanager)
         List<String> services = linkDependencies().provides().getOrDefault(name.substring(18), List.of());
         if (services.isEmpty()) {
             return null;
@@ -575,22 +581,23 @@ public class ModuleClassLoader extends ClassLoader {
         if (linkState instanceof LinkState.Dependencies dependencies) {
             return dependencies;
         }
-        List<LoadedDependency> loadedDependencies = linkState.dependencies().stream()
-            .map(d -> {
-                ModuleLoader ml = d.moduleLoader().orElse(moduleLoader);
-                if (d.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
-                    LoadedModule lm = ml.loadModule(d.moduleName());
-                    return lm == null ? null : new LoadedDependency(d, lm);
-                } else {
-                    try {
-                        return new LoadedDependency(d, ml.requireModule(d.moduleName()));
-                    } catch (ModuleLoadException e) {
-                        throw e.withMessage(e.getMessage() + " (required by " + moduleName + ")");
-                    }
+        List<Dependency> lsDeps = linkState.dependencies();
+        ArrayList<LoadedDependency> loadedDependencies = new ArrayList<>(lsDeps.size());
+        for (Dependency dep : lsDeps) {
+            ModuleLoader ml = dep.moduleLoader().orElse(moduleLoader);
+            if (dep.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
+                LoadedModule lm = ml.loadModule(dep.moduleName());
+                if (lm != null) {
+                    loadedDependencies.add(new LoadedDependency(dep, lm));
                 }
-            })
-            .filter(Objects::nonNull)
-            .collect(Util.toList());
+            } else {
+                try {
+                    loadedDependencies.add(new LoadedDependency(dep, ml.requireModule(dep.moduleName())));
+                } catch (ModuleLoadException e) {
+                    throw e.withMessage(e.getMessage() + " (required by " + moduleName + ")");
+                }
+            }
+        }
         return doLocked(ModuleClassLoader::linkDependenciesLocked, loadedDependencies);
     }
 
@@ -618,7 +625,7 @@ public class ModuleClassLoader extends ClassLoader {
         java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC
     );
 
-    private LinkState.Defined linkDefined() {
+    LinkState.Defined linkDefined() {
         // fast path
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
@@ -660,17 +667,19 @@ public class ModuleClassLoader extends ClassLoader {
         return doLocked(ModuleClassLoader::linkDefinedLocked, descriptor);
     }
 
+    private static final List<Configuration> PARENT_CONFIGS = List.of(ModuleLayer.boot().configuration());
+    private static final List<ModuleLayer> BOOT_LAYER_ONLY = List.of(ModuleLayer.boot());
+
     private LinkState.Defined linkDefinedLocked(java.lang.module.ModuleDescriptor descriptor) {
         LinkState.Dependencies linkState = linkDependencies();
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }
         log.debugf("Linking module %s to defined state", moduleName);
-        Set<String> exportedPackages = linkState.packages().entrySet().stream().filter(e -> e.getValue().packageAccess().isAtLeast(PackageAccess.EXPORTED)).map(Map.Entry::getKey).collect(Collectors.toUnmodifiableSet());
         LinkState.Defined defined;
         if (linkState.modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
             // nothing needed
-            defined = new LinkState.Defined(linkState, getUnnamedModule(), null, exportedPackages);
+            defined = new LinkState.Defined(linkState, getUnnamedModule(), null);
         } else {
             // all the stuff that the JDK needs to have a module
             URI uri = linkState.location();
@@ -679,20 +688,13 @@ public class ModuleClassLoader extends ClassLoader {
                     throw new UnsupportedOperationException();
                 }
             };
-            List<Configuration> parentConfigs = List.of(ModuleLayer.boot().configuration());
             final Configuration cf = Configuration.resolve(
                 new SingleModuleFinder(modRef),
-                parentConfigs,
+                PARENT_CONFIGS,
                 Util.EMPTY_MF,
                 List.of(moduleName)
             );
-            ModuleLayer.Controller ctl = ModuleLayer.defineModules(cf, List.of(ModuleLayer.boot()), name -> {
-                if (name.equals(moduleName)) {
-                    return this;
-                } else {
-                    throw new IllegalStateException("Wrong module name: " + name + " (expected " + moduleName + ")");
-                }
-            });
+            ModuleLayer.Controller ctl = ModuleLayer.defineModules(cf, BOOT_LAYER_ONLY, ignored -> this);
             ModuleLayer moduleLayer = ctl.layer();
             Module module = moduleLayer.findModule(moduleName).orElseThrow(IllegalStateException::new);
             if (linkState.modifiers().contains(ModuleDescriptor.Modifier.NATIVE_ACCESS)) {
@@ -701,8 +703,7 @@ public class ModuleClassLoader extends ClassLoader {
             defined = new LinkState.Defined(
                 linkState,
                 module,
-                ctl,
-                exportedPackages
+                ctl
             );
             defined.addReads(Util.myModule);
             Util.myModule.addReads(module);
@@ -711,60 +712,7 @@ public class ModuleClassLoader extends ClassLoader {
         return defined;
     }
 
-    /**
-     * Link a dependency's exported packages into this module, recursively.
-     *
-     * @param linkState this module's link state (must not be {@code null})
-     * @param loadedDependency the loaded dependency (must not be {@code null})
-     * @param modulesByPackage the map being populated (must not be {@code null})
-     * @param visited the visited dependency set (must not be {@code null})
-     */
-    private void linkExportedPackages(LinkState.Defined linkState, LoadedModule loadedDependency, Map<String, LoadedModule> modulesByPackage, Set<LoadedModule> visited) {
-        if (visited.add(loadedDependency)) {
-            // make sure that we read transitively imported dependencies
-            linkState.addReads(loadedDependency.module());
-            System.out.println("Linking from " + linkState.module() + " to " + loadedDependency);
-            Set<String> packages = loadedDependency.exportedPackageNames(linkState.module());
-            for (String pkg : packages) {
-                modulesByPackage.putIfAbsent(pkg, loadedDependency);
-            }
-            if (loadedDependency.classLoader() instanceof ModuleClassLoader mcl) {
-                for (Dependency dependency : mcl.linkNew().dependencies()) {
-                    if (dependency.modifiers().contains(Dependency.Modifier.TRANSITIVE)) {
-                        LoadedModule dep = dependency.moduleLoader().orElse(mcl.moduleLoader()).loadModule(dependency.moduleName());
-                        if (dep == null) {
-                            if (dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
-                                continue;
-                            }
-                            throw new ModuleLoadException("Failed to link " + moduleName + ": dependency from " + mcl.moduleName
-                                + " to " + dependency.moduleName() + " is missing");
-                        }
-                        linkExportedPackages(linkState, dep, modulesByPackage, visited);
-                    }
-                }
-            } else {
-                Module module = loadedDependency.module();
-                java.lang.module.ModuleDescriptor descriptor = module.getDescriptor();
-                if (descriptor != null) {
-                    for (java.lang.module.ModuleDescriptor.Requires require : descriptor.requires()) {
-                        if (require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.TRANSITIVE)) {
-                            Optional<Module> optDep = module.getLayer().findModule(require.name());
-                            if (optDep.isEmpty()) {
-                                if (require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC)) {
-                                    continue;
-                                }
-                                throw new ModuleLoadException("Failed to link " + moduleName + ": dependency from " + module.getName()
-                                    + " to " + require.name() + " is missing");
-                            }
-                            linkExportedPackages(linkState, LoadedModule.forModule(optDep.get()), modulesByPackage, visited);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private LinkState.Packages linkPackages() {
+    LinkState.Packages linkPackages() {
         // fast path
         if (linkState instanceof LinkState.Packages packages) {
             return packages;
@@ -776,49 +724,59 @@ public class ModuleClassLoader extends ClassLoader {
         LoadedModule self = LoadedModule.forModule(linkState.module());
         HashSet<LoadedModule> visited = new HashSet<>();
         visited.add(self);
+        // link immediate dependency packages
         HashMap<String, LoadedModule> modulesByPackage = new HashMap<>();
-        for (Dependency dependency : linkState.dependencies()) {
-            String depName = dependency.moduleName();
-            LoadedModule lm = dependency.moduleLoader().orElse(moduleLoader()).loadModule(depName);
-            if (lm == null) {
-                if (dependency.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
-                    continue;
-                }
-                throw new ModuleNotFoundException("Cannot resolve dependency " + depName + " of " + moduleName);
+        for (LoadedDependency ld : linkState.loadedDependencies()) {
+            Dependency dependency = ld.dependency();
+            LoadedModule lm = ld.loadedModule();
+            Module depModule = lm.module();
+            if (dependency.isRead()) {
+                linkState.addReads(depModule);
             }
-            Module module = lm.module();
-            linkState.addReads(module);
-            if (dependency.modifiers().contains(Dependency.Modifier.SERVICES)) {
-                // link up service loaders
-                ModuleLayer layer = module.getLayer();
+            if (dependency.isServices()) {
+                // link up service loaders early; needed in case someone uses ServiceLoader.load(svc, myMCL)
+                // TODO in this case providers are still not registered
+                ModuleLayer layer = depModule.getLayer();
                 if (layer != ModuleLayer.boot()) {
                     registerLayer(layer);
                 }
             }
-            if (dependency.modifiers().contains(Dependency.Modifier.UNLINKED)) {
-                // that's all we have to do
-                continue;
+            boolean linked = dependency.isLinked();
+            if (dependency.isTransitive()) {
+                linkTransitive(linkState, dependency.isRead(), linked, lm, modulesByPackage, visited);
             }
             // skip boot modules for memory efficiency
-            if (! ModuleLayer.boot().modules().contains(module)) {
-                linkExportedPackages(linkState, lm, modulesByPackage, visited);
+            if (linked && ! ModuleLayer.boot().modules().contains(depModule)) {
+                // link in dependency packages to main linkage map
+                lm.forEachExportedPackage(linkState.module(), pn -> {
+                    modulesByPackage.putIfAbsent(pn, lm);
+                });
             }
-            for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
-                switch (entry.getValue()) {
-                    case EXPORTED -> {
-                        if (lm.classLoader() instanceof ModuleClassLoader mcl) {
-                            mcl.linkDefined().addExports(entry.getKey(), module());
-                        } else {
-                            Util.addExports(module, entry.getKey(), module());
+            // link up special package accesses of dependency (only for immediate dependencies)
+            Module myModule = module();
+            if (lm.classLoader() instanceof ModuleClassLoader mcl) {
+                for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
+                    switch (entry.getValue()) {
+                        case EXPORTED -> mcl.linkDefined().addExports(entry.getKey(), myModule);
+                        case OPEN -> mcl.linkDefined().addOpens(entry.getKey(), myModule);
+                        case PRIVATE -> {
+                            continue;
                         }
-                        modulesByPackage.put(entry.getKey(), lm);
                     }
-                    case OPEN -> {
-                        if (lm.classLoader() instanceof ModuleClassLoader mcl) {
-                            mcl.linkDefined().addOpens(entry.getKey(), module());
-                        } else {
-                            Util.addOpens(module, entry.getKey(), module());
+                    if (linked) {
+                        modulesByPackage.putIfAbsent(entry.getKey(), lm);
+                    }
+                }
+            } else {
+                for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
+                    switch (entry.getValue()) {
+                        case EXPORTED -> Util.addExports(depModule, entry.getKey(), myModule);
+                        case OPEN -> Util.addOpens(depModule, entry.getKey(), myModule);
+                        case PRIVATE -> {
+                            continue;
                         }
+                    }
+                    if (linked) {
                         modulesByPackage.put(entry.getKey(), lm);
                     }
                 }
@@ -859,6 +817,66 @@ public class ModuleClassLoader extends ClassLoader {
         );
         linkState = linked;
         return linked;
+    }
+
+    /**
+     * Transitively link the dependencies of a dependency.
+     *
+     * @param linkState this module's link state (must not be {@code null})
+     * @param read {@code true} to register the dependency as readable, otherwise {@code false}
+     * @param linked {@code true} to register the dependency as linked, otherwise {@code false}
+     * @param loadedModule the loaded dependency module (must not be {@code null})
+     * @param modulesByPackage the map being populated (must not be {@code null})
+     * @param visited the visited module set (must not be {@code null})
+     */
+    private void linkTransitive(LinkState.Defined linkState, boolean read, boolean linked, LoadedModule loadedModule, Map<String, LoadedModule> modulesByPackage, Set<LoadedModule> visited) {
+        if (visited.add(loadedModule)) {
+            if (loadedModule.classLoader() instanceof ModuleClassLoader mcl) {
+                for (LoadedDependency ld : mcl.linkDependencies().loadedDependencies()) {
+                    Dependency dependency = ld.dependency();
+                    boolean subLinked = linked && dependency.isLinked();
+                    if (subLinked) {
+                        loadedModule.forEachExportedPackage(linkState.module(), pn -> {
+                            modulesByPackage.putIfAbsent(pn, loadedModule);
+                        });
+                    }
+                    boolean subRead = read && dependency.isRead();
+                    if (subRead) {
+                        linkState.addReads(loadedModule.module());
+                    }
+                    if (dependency.isTransitive()) {
+                        linkTransitive(linkState, subRead, subLinked, ld.loadedModule(), modulesByPackage, visited);
+                    }
+                }
+            } else {
+                Module module = loadedModule.module();
+                java.lang.module.ModuleDescriptor descriptor = module.getDescriptor();
+                if (descriptor != null) {
+                    for (java.lang.module.ModuleDescriptor.Requires require : descriptor.requires()) {
+                        if (require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.TRANSITIVE)) {
+                            Optional<Module> optDep = module.getLayer().findModule(require.name());
+                            if (optDep.isEmpty()) {
+                                if (require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC)) {
+                                    continue;
+                                }
+                                throw new ModuleLoadException("Failed to link " + moduleName + ": dependency from " + module.getName()
+                                    + " to " + require.name() + " is missing");
+                            }
+                            LoadedModule subLm = LoadedModule.forModule(optDep.get());
+                            if (linked) {
+                                subLm.forEachExportedPackage(linkState.module(), pn -> {
+                                    modulesByPackage.putIfAbsent(pn, subLm);
+                                });
+                            }
+                            if (read) {
+                                linkState.addReads(loadedModule.module());
+                            }
+                            linkTransitive(linkState, read, linked, subLm, modulesByPackage, visited);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     LinkState.Provides linkProvides() {
@@ -915,7 +933,7 @@ public class ModuleClassLoader extends ClassLoader {
             return uses;
         }
         for (LoadedDependency ld : linkState.loadedDependencies()) {
-            if (ld.loadedModule().classLoader() instanceof ModuleClassLoader mcl) {
+            if (ld.dependency().isServices() && ld.loadedModule().classLoader() instanceof ModuleClassLoader mcl) {
                 mcl.linkProvides();
             }
         }
@@ -1157,9 +1175,8 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
-    Set<String> exportedPackageNames(Module toModule) {
-        return linkNew().packages().keySet().stream().filter(p -> isExported(p, toModule))
-            .collect(Collectors.toUnmodifiableSet());
+    void forEachExportedPackage(Module toModule, Consumer<String> action) {
+        linkNew().packages().keySet().stream().filter(p -> isExported(p, toModule)).forEach(action);
     }
 
     boolean isExported(String packageName, Module toModule) {

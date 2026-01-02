@@ -95,7 +95,7 @@ abstract class LinkState {
 
         Dependencies(final New other, final List<LoadedDependency> loadedDependencies) {
             super(other);
-            this.loadedDependencies = loadedDependencies;
+            this.loadedDependencies = List.copyOf(loadedDependencies);
         }
 
         Dependencies(Dependencies other) {
@@ -110,35 +110,31 @@ abstract class LinkState {
     static class Defined extends Dependencies {
         private final Module module;
         private final ModuleLayer.Controller layerController;
-        private final Set<String> exportedPackages;
         private final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache;
 
         private Defined(
             final Dependencies other,
             final Module module,
             final ModuleLayer.Controller layerController,
-            final Set<String> exportedPackages,
             final ConcurrentHashMap<List<CodeSigner>, ProtectionDomain> pdCache
         ) {
             super(other);
             this.module = module;
             this.layerController = layerController;
-            this.exportedPackages = exportedPackages;
             this.pdCache = pdCache;
         }
 
         Defined(
             final Dependencies other,
             final Module module,
-            final ModuleLayer.Controller layerController,
-            final Set<String> exportedPackages
+            final ModuleLayer.Controller layerController
         ) {
-            this(other, module, layerController, exportedPackages, new ConcurrentHashMap<>());
+            this(other, module, layerController, new ConcurrentHashMap<>());
             myModule.addReads(module);
         }
 
         Defined(final Defined other) {
-            this(other, other.module, other.layerController, other.exportedPackages, other.pdCache);
+            this(other, other.module, other.layerController, other.pdCache);
         }
 
         Module module() {
@@ -185,10 +181,6 @@ abstract class LinkState {
             if (layerController != null) {
                 addProvides(module, service, impl);
             }
-        }
-
-        Set<String> exportedPackages() {
-            return exportedPackages;
         }
 
         ProtectionDomain cachedProtectionDomain(final Resource resource) {

@@ -631,6 +631,7 @@ public record ModuleDescriptor(
                 case XMLStreamConstants.START_ELEMENT -> {
                     checkNamespace(xml);
                     switch (xml.getLocalName()) {
+                        // TODO: separate dep elements for linked, unlinked services, etc. dependency types
                         case "dependency" -> dependencies.add(parseDependencyElement(xml));
                         default -> throw unknownElement(xml);
                     }
@@ -644,7 +645,7 @@ public record ModuleDescriptor(
 
     private static Dependency parseDependencyElement(final XMLStreamReader xml) throws XMLStreamException {
         String name = null;
-        Modifiers<Dependency.Modifier> modifiers = Modifiers.of(Dependency.Modifier.SERVICES);
+        Modifiers<Dependency.Modifier> modifiers = Modifiers.of(Dependency.Modifier.SERVICES, Dependency.Modifier.LINKED, Dependency.Modifier.READ);
         Map<String, PackageAccess> packageAccesses = Map.of();
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
@@ -660,9 +661,9 @@ public record ModuleDescriptor(
                         modifiers = modifiers.with(Dependency.Modifier.OPTIONAL);
                     }
                 }
-                case "unlinked" -> {
-                    if (Boolean.parseBoolean(xml.getAttributeValue(i))) {
-                        modifiers = modifiers.with(Dependency.Modifier.UNLINKED);
+                case "linked" -> {
+                    if (! Boolean.parseBoolean(xml.getAttributeValue(i))) {
+                        modifiers = modifiers.without(Dependency.Modifier.LINKED);
                     }
                 }
                 case "services" -> {

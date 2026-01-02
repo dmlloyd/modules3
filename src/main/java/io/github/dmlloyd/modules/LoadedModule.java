@@ -2,8 +2,7 @@ package io.github.dmlloyd.modules;
 
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.function.Consumer;
 
 import io.smallrye.common.constraint.Assert;
 
@@ -11,7 +10,6 @@ import io.smallrye.common.constraint.Assert;
  * A module that has been loaded, but not necessarily defined yet.
  * Objects of this type represent handles to a module, are not unique,
  * and have no defined identity semantics.
- * Usage as a hash key in particular is not supported.
  */
 public final class LoadedModule {
     private final Module module;
@@ -64,24 +62,11 @@ public final class LoadedModule {
         }
     }
 
-    /**
-     * {@return the set of package names exported to the given module (not {@code null})}
-     * This set only includes packages defined within this module directly.
-     * @param toModule the module being exported to (must not be {@code null})
-     */
-    public Set<String> exportedPackageNames(Module toModule) {
-        if (this.module != null) {
-            return this.module.getPackages().stream().filter(pn -> module.isExported(pn, toModule)).collect(Collectors.toUnmodifiableSet());
+    public void forEachExportedPackage(Module toModule, Consumer<String> action) {
+        if (module != null) {
+            module.getPackages().stream().filter(pn -> module.isExported(pn, toModule)).forEach(action);
         } else {
-            return moduleClassLoader.exportedPackageNames(toModule);
-        }
-    }
-
-    boolean isExported(String packageName, Module toModule) {
-        if (this.module != null) {
-            return this.module.isExported(packageName, toModule);
-        } else {
-            return moduleClassLoader.isExported(packageName, toModule);
+            moduleClassLoader.forEachExportedPackage(toModule, action);
         }
     }
 
@@ -101,7 +86,7 @@ public final class LoadedModule {
     }
 
     public boolean equals(LoadedModule other) {
-        return other != null && module == other.module && moduleClassLoader  == other.moduleClassLoader;
+        return other != null && module == other.module && moduleClassLoader == other.moduleClassLoader;
     }
 
     public int hashCode() {

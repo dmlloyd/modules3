@@ -108,6 +108,30 @@ public record Dependency(
         return ! modifiers.contains(Modifier.TRANSITIVE);
     }
 
+    public boolean isLinked() {
+        return modifiers.contains(Modifier.LINKED);
+    }
+
+    public boolean isNonLinked() {
+        return ! modifiers.contains(Modifier.LINKED);
+    }
+
+    public boolean isRead() {
+        return modifiers.contains(Modifier.READ);
+    }
+
+    public boolean isNonRead() {
+        return ! modifiers.contains(Modifier.READ);
+    }
+
+    public boolean isServices() {
+        return modifiers.contains(Modifier.SERVICES);
+    }
+
+    public boolean isNonServices() {
+        return ! modifiers.contains(Modifier.SERVICES);
+    }
+
     /**
      * Modifiers for dependencies.
      */
@@ -129,15 +153,21 @@ public record Dependency(
         /**
          * The dependency is transitive, which is to say that a dependency
          * on the module containing this dependency implies a dependency on the target as well.
+         * Only globally exported packages from a transitive dependency will be made available.
          */
         TRANSITIVE,
         /**
-         * The dependency should not be linked for class loading.
-         * It will only be registered for reading.
+         * The dependency should be linked for class loading.
+         * Implies {@link #READ}.
          */
-        UNLINKED,
+        LINKED,
         /**
-         * The dependency will be examined for service implementations.
+         * The dependency should be readable from the source module.
+         * Implied for unnamed and automatic modules.
+         */
+        READ,
+        /**
+         * Service implementations in the dependency are available to the source module.
          */
         SERVICES,
         ;

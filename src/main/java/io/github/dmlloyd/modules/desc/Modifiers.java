@@ -18,6 +18,7 @@ public final class Modifiers<M extends Enum<M> & ModifierFlag> {
         this.flags = flags;
     }
 
+    // TODO: Do this better
     public String toString(IntFunction<M> resolver) {
         int flags = this.flags;
         if (flags != 0) {
@@ -36,7 +37,7 @@ public final class Modifiers<M extends Enum<M> & ModifierFlag> {
         return "(none)";
     }
 
-    private static final List<?> allValues = IntStream.range(0, 64).mapToObj(Modifiers::new).collect(Util.toList());
+    private static final List<?> allValues = IntStream.range(0, 128).mapToObj(Modifiers::new).collect(Util.toList());
 
     @SuppressWarnings("unchecked")
     public static <M extends Enum<M> & ModifierFlag> Modifiers<M> of() {
