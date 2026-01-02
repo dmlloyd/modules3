@@ -372,13 +372,13 @@ public class ModuleClassLoader extends ClassLoader {
      * @throws ClassNotFoundException if the class is not found in this class loader
      */
     final Class<?> loadClassDirect(String name) throws ClassNotFoundException {
-        String dotName = name.replace('/', '.');
-        Class<?> loaded = findLoadedClass(dotName);
+        String binaryName = name.replace('/', '.');
+        Class<?> loaded = findLoadedClass(binaryName);
         if (loaded != null) {
             return loaded;
         }
         LinkState.Defined linked = linkDefined();
-        String packageName = Util.packageName(dotName);
+        String packageName = Util.packageName(binaryName);
         if (! packageName.isEmpty() && ! linked.packages().containsKey(packageName)) {
             throw new ClassNotFoundException("Class `" + name + "` is not in a package that is reachable from " + moduleName);
         }
@@ -389,10 +389,10 @@ public class ModuleClassLoader extends ClassLoader {
             if (resource != null) {
                 // found it!
                 ProtectionDomain pd = linked.cachedProtectionDomain(resource);
-                return defineOrGetClass(dotName, resource, pd);
+                return defineOrGetClass(binaryName, resource, pd);
             }
         } catch (IOException e) {
-            throw new ClassNotFoundException("Failed to load " + dotName, e);
+            throw new ClassNotFoundException("Failed to load " + binaryName, e);
         }
         throw new ClassNotFoundException("Class `" + name + "` is not found in " + moduleName);
     }
@@ -634,7 +634,6 @@ public class ModuleClassLoader extends ClassLoader {
         if (linkState instanceof LinkState.Defined defined) {
             return defined;
         }
-        System.out.println("Defining " + moduleName() + " with modifiers " + ModuleDescriptor.Modifier.toString(linkState.modifiers()));
         java.lang.module.ModuleDescriptor descriptor;
         if (linkState.modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
             descriptor = null;
@@ -742,16 +741,7 @@ public class ModuleClassLoader extends ClassLoader {
                 }
             }
             boolean linked = dependency.isLinked();
-            if (dependency.isTransitive()) {
-                linkTransitive(linkState, dependency.isRead(), linked, lm, modulesByPackage, visited);
-            }
-            // skip boot modules for memory efficiency
-            if (linked && ! ModuleLayer.boot().modules().contains(depModule)) {
-                // link in dependency packages to main linkage map
-                lm.forEachExportedPackage(linkState.module(), pn -> {
-                    modulesByPackage.putIfAbsent(pn, lm);
-                });
-            }
+            linkTransitive(linkState, dependency.isRead(), linked, lm, modulesByPackage, visited);
             // link up special package accesses of dependency (only for immediate dependencies)
             Module myModule = module();
             if (lm.classLoader() instanceof ModuleClassLoader mcl) {
@@ -777,7 +767,7 @@ public class ModuleClassLoader extends ClassLoader {
                         }
                     }
                     if (linked) {
-                        modulesByPackage.put(entry.getKey(), lm);
+                        modulesByPackage.putIfAbsent(entry.getKey(), lm);
                     }
                 }
             }
@@ -862,8 +852,9 @@ public class ModuleClassLoader extends ClassLoader {
                                 throw new ModuleLoadException("Failed to link " + moduleName + ": dependency from " + module.getName()
                                     + " to " + require.name() + " is missing");
                             }
-                            LoadedModule subLm = LoadedModule.forModule(optDep.get());
-                            if (linked) {
+                            Module subModule = optDep.get();
+                            LoadedModule subLm = LoadedModule.forModule(subModule);
+                            if (linked && ! ModuleLayer.boot().modules().contains(subModule)) {
                                 subLm.forEachExportedPackage(linkState.module(), pn -> {
                                     modulesByPackage.putIfAbsent(pn, subLm);
                                 });
@@ -1026,32 +1017,35 @@ public class ModuleClassLoader extends ClassLoader {
         };
     }
 
-    private Class<?> defineOrGetClass(final String dotName, final Resource resource, final ProtectionDomain pd) throws IOException {
-        return defineOrGetClass(dotName, resource.asBuffer(), pd);
+    private Class<?> defineOrGetClass(final String binaryName, final Resource resource, final ProtectionDomain pd) throws IOException {
+        return defineOrGetClass(binaryName, resource.asBuffer(), pd);
     }
 
-    private Class<?> defineOrGetClass(final String dotName, final ByteBuffer buffer, final ProtectionDomain pd) {
-        String packageName = Util.packageName(dotName);
+    private Class<?> defineOrGetClass(final String binaryName, final ByteBuffer buffer, final ProtectionDomain pd) {
+        String packageName = Util.packageName(binaryName);
         if (! packageName.isEmpty()) {
             loadPackageDirect(packageName);
         }
-        Class<?> clazz = findLoadedClass(dotName);
+        Class<?> clazz = findLoadedClass(binaryName);
         if (clazz != null) {
             return clazz;
         }
         try {
-            return defineClass(dotName, buffer, pd);
+            return defineClass(binaryName, buffer, pd);
         } catch (VerifyError e) {
             // serious problem!
+            log.debugf(e, "Verifying class %s failed", binaryName);
             throw e;
         } catch (LinkageError e) {
             // probably a duplicate
-            Class<?> loaded = findLoadedClass(dotName);
+            Class<?> loaded = findLoadedClass(binaryName);
             if (loaded != null) {
                 return loaded;
             }
             // actually some other problem
-            throw new LinkageError("Failed to link class " + dotName + " in " + this, e);
+            LinkageError le = new LinkageError("Failed to link class " + binaryName + " in " + this, e);
+            log.debugf(e, "Failed to load %s", binaryName);
+            throw le;
         }
     }
 

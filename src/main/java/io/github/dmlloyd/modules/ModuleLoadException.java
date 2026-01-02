@@ -50,6 +50,10 @@ public class ModuleLoadException extends RuntimeException {
     ModuleLoadException withMessage(final String newMsg) {
         ModuleLoadException newEx = new ModuleLoadException(newMsg);
         newEx.setStackTrace(getStackTrace());
+        Throwable cause = getCause();
+        if (cause != null) {
+            newEx.initCause(cause);
+        }
         return newEx;
     }
 }
