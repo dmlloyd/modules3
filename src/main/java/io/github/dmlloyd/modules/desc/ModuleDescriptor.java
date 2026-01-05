@@ -25,6 +25,8 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import io.smallrye.classfile.Annotation;
+import io.smallrye.classfile.AnnotationElement;
+import io.smallrye.classfile.AnnotationValue;
 import io.smallrye.classfile.Attributes;
 import io.smallrye.classfile.ClassFile;
 import io.smallrye.classfile.ClassModel;
@@ -33,6 +35,7 @@ import io.smallrye.classfile.attribute.ModuleExportInfo;
 import io.smallrye.classfile.attribute.ModuleMainClassAttribute;
 import io.smallrye.classfile.attribute.ModuleOpenInfo;
 import io.smallrye.classfile.attribute.ModulePackagesAttribute;
+import io.smallrye.classfile.attribute.RuntimeInvisibleAnnotationsAttribute;
 import io.smallrye.classfile.attribute.RuntimeVisibleAnnotationsAttribute;
 import io.smallrye.classfile.constantpool.ClassEntry;
 import io.smallrye.classfile.constantpool.ModuleEntry;
@@ -290,6 +293,7 @@ public record ModuleDescriptor(
         List<ResourceLoader> resourceLoaders,
         Map<String, Map<String, PackageAccess>> extraAccesses
     ) throws IOException {
+        final Map<String, Map<String, PackageAccess>> modifiedExtraAccesses = new HashMap<>(extraAccesses);
         ClassModel classModel;
         try (InputStream is = moduleInfo.openStream()) {
             classModel = ClassFile.of().parse(is.readAllBytes());
@@ -301,6 +305,7 @@ public record ModuleDescriptor(
         Optional<ModulePackagesAttribute> mpa = classModel.findAttribute(Attributes.modulePackages());
         Optional<ModuleMainClassAttribute> mca = classModel.findAttribute(Attributes.moduleMainClass());
         Optional<RuntimeVisibleAnnotationsAttribute> rva = classModel.findAttribute(Attributes.runtimeVisibleAnnotations());
+        Optional<RuntimeInvisibleAnnotationsAttribute> ria = classModel.findAttribute(Attributes.runtimeInvisibleAnnotations());
         Modifiers<ModuleDescriptor.Modifier> mods = Modifiers.of();
         boolean open = classModel.flags().has(AccessFlag.OPEN);
         if (open) {
@@ -311,6 +316,26 @@ public record ModuleDescriptor(
             Optional<Annotation> opt = a.annotations().stream().filter(an -> an.className().equalsString(NativeAccess.class.getName())).findAny();
             if (opt.isPresent()) {
                 mods = mods.with(Modifier.NATIVE_ACCESS);
+            }
+        }
+        if (ria.isPresent()) {
+            RuntimeInvisibleAnnotationsAttribute a = ria.get();
+            for (Annotation ann : a.annotations()) {
+                switch (ann.className().stringValue()) {
+                    case "io.smallrye.common.annotation.AddExports", "io.smallrye.common.annotation.AddOpens" ->
+                        processAccessAnnotation(ann, modifiedExtraAccesses);
+                    case "io.smallrye.common.annotation.AddExports$List",  "io.smallrye.common.annotation.AddOpens$List" -> {
+                        for (AnnotationElement element : ann.elements()) {
+                            if (element.name().stringValue().equals("value")) {
+                                AnnotationValue.OfArray val = (AnnotationValue.OfArray) element.value();
+                                for (AnnotationValue value : val.values()) {
+                                    processAccessAnnotation(((AnnotationValue.OfAnnotation)value).annotation(), modifiedExtraAccesses);
+                                }
+                            }
+                        }
+                    }
+                    case "io.smallrye.common.annotation.NativeAccess" -> mods = mods.with(Modifier.NATIVE_ACCESS);
+                }
             }
         }
         Map<String, PackageInfo> packagesMap = new HashMap<>();
@@ -347,11 +372,7 @@ public record ModuleDescriptor(
                     .map(Utf8Entry::stringValue)
                     .map(String::intern)
                     .collect(Collectors.toUnmodifiableSet());
-                if (packagesMap.containsKey(packageName)) {
-                    packagesMap.put(packageName, packagesMap.get(packageName).withExportTargets(exportTargets));
-                } else {
-                    packagesMap.put(packageName, PackageInfo.of(PackageAccess.PRIVATE, exportTargets, Set.of()));
-                }
+                packagesMap.put(packageName, packagesMap.getOrDefault(packageName, PackageInfo.PRIVATE).withExportTargets(exportTargets));
             }
         }
         mpa.ifPresent(modulePackagesAttribute -> modulePackagesAttribute.packages().stream()
@@ -377,7 +398,7 @@ public record ModuleDescriptor(
                     r.requires().name().stringValue(),
                     toModifiers(r.requiresFlags()),
                     Optional.empty(),
-                    extraAccesses.getOrDefault(r.requires().name().stringValue(), Map.of())
+                    modifiedExtraAccesses.getOrDefault(r.requires().name().stringValue(), Map.of())
                 )
             ).collect(Util.toList()),
             ma.uses().stream()
@@ -402,6 +423,36 @@ public record ModuleDescriptor(
             desc = desc.withDiscoveredPackages(resourceLoaders);
         }
         return desc;
+    }
+
+    private static void processAccessAnnotation(Annotation ann, Map<String, Map<String, PackageAccess>> modifiedExtraAccesses) {
+        String moduleName = null;
+        List<String> packages = null;
+        for (AnnotationElement element : ann.elements()) {
+            switch (element.name().stringValue()) {
+                case "module" -> moduleName = ((AnnotationValue.OfString)element.value()).stringValue();
+                case "packages" -> packages = ((AnnotationValue.OfArray)element.value()).values().stream().map(AnnotationValue.OfString.class::cast).map(AnnotationValue.OfString::stringValue).toList();
+            }
+        }
+        if (moduleName == null || moduleName.equals("ALL-UNNAMED") || packages == null) {
+            // ignore invalid annotation
+            return;
+        }
+        switch (ann.className().stringValue()) {
+            // override all
+            case "io.smallrye.common.annotation.AddOpens" -> {
+                for (String pn : packages) {
+                    modifiedExtraAccesses.computeIfAbsent(moduleName, Util::newHashMap).put(pn, PackageAccess.OPEN);
+                }
+            }
+            // do not override OPEN
+            case "io.smallrye.common.annotation.AddExports" -> {
+                for (String pn : packages) {
+                    modifiedExtraAccesses.computeIfAbsent(moduleName, Util::newHashMap).putIfAbsent(pn, PackageAccess.EXPORTED);
+                }
+            }
+            default -> throw Assert.impossibleSwitchCase(ann.className().stringValue());
+        }
     }
 
     public static ModuleDescriptor fromManifest(String defaultName, String defaultVersion, Manifest manifest, List<ResourceLoader> resourceLoaders) throws IOException {

@@ -7,7 +7,10 @@ import java.lang.annotation.Target;
 
 /**
  * Indicate that a module should have native access if possible on Java 22 or later.
+ *
+ * @deprecated remove with smallrye-common release
  */
+@Deprecated
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.MODULE)
 public @interface NativeAccess {

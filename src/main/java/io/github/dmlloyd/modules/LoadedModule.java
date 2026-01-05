@@ -94,7 +94,7 @@ public final class LoadedModule {
     }
 
     public String toString() {
-        return module != null ? String.valueOf(module) : moduleClassLoader.toString();
+        return module != null ? module.toString() : "module⁺ " + moduleClassLoader.moduleName();
     }
 
     /**
