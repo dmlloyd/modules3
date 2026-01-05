@@ -13,6 +13,7 @@ module io.github.dmlloyd.modules {
     // todo: only do this on packaging
     requires java.se;
     requires jdk.unsupported;
+    requires io.github.dmlloyd.modules;
 
     exports io.github.dmlloyd.modules;
     exports io.github.dmlloyd.modules.desc;

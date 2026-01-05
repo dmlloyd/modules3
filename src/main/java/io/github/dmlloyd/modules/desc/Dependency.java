@@ -3,8 +3,10 @@ package io.github.dmlloyd.modules.desc;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
 
 import io.github.dmlloyd.modules.ModuleLoader;
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.constraint.Assert;
 
 /**
@@ -39,7 +41,7 @@ public record Dependency(
      * @param moduleName the dependency name (must not be {@code null})
      */
     public Dependency(String moduleName) {
-        this(moduleName, Modifiers.of(), Optional.empty());
+        this(moduleName, Modifier.set(), Optional.empty());
     }
 
     /**
@@ -49,7 +51,12 @@ public record Dependency(
      * @param modifier the modifier to add (must not be {@code null})
      */
     public Dependency(String moduleName, Modifier modifier) {
-        this(moduleName, Modifiers.of(modifier), Optional.empty());
+        this(moduleName, Modifier.set(modifier), Optional.empty());
+    }
+
+    public Dependency withAdditionalPackageAccesses(Map<String, PackageAccess> packageAccesses) {
+        Assert.checkNotNullParam("packageAccesses", packageAccesses);
+        return new Dependency(this.moduleName, this.modifiers, this.moduleLoader, Util.merge(this.packageAccesses, packageAccesses, PackageAccess::max));
     }
 
     /**
@@ -173,10 +180,55 @@ public record Dependency(
         ;
 
         public static final List<Modifier> values = List.of(values());
+
+        private static final List<Modifiers<Modifier>> sets = List.copyOf(IntStream.range(0, 16)
+            .mapToObj(bits -> new Modifiers<Modifier>(values, Modifier::forBits, bits))
+            .toList()
+        );
+
+        public static Modifiers<Modifier> set() {
+            return sets.get(0);
+        }
+
+        public static Modifiers<Modifier> set(Modifier modifier) {
+            return sets.get(bit(modifier));
+        }
+
+        public static Modifiers<Modifier> set(Modifier modifier0, Modifier modifier1) {
+            return sets.get(bit(modifier0) | bit(modifier1));
+        }
+
+        public static Modifiers<Modifier> set(Modifier modifier0, Modifier modifier1, Modifier modifier2) {
+            return sets.get(bit(modifier0) | bit(modifier1) | bit(modifier2));
+        }
+
+        public static Modifiers<Modifier> set(Modifier modifier0, Modifier modifier1, Modifier modifier2, Modifier modifier3) {
+            return sets.get(bit(modifier0) | bit(modifier1) | bit(modifier2) | bit(modifier3));
+        }
+
+        public static Modifiers<Modifier> set(Modifier modifier0, Modifier modifier1, Modifier modifier2, Modifier modifier3, Modifier modifier4) {
+            return sets.get(bit(modifier0) | bit(modifier1) | bit(modifier2) | bit(modifier3) | bit(modifier4));
+        }
+
+        public static Modifiers<Modifier> set(Modifier modifier0, Modifier modifier1, Modifier modifier2, Modifier modifier3, Modifier modifier4, Modifier modifier5) {
+            return sets.get(bit(modifier0) | bit(modifier1) | bit(modifier2) | bit(modifier3) | bit(modifier4) | bit(modifier5));
+        }
+
+        public static Modifiers<Modifier> set(Modifier modifier0, Modifier modifier1, Modifier modifier2, Modifier modifier3, Modifier modifier4, Modifier modifier5, Modifier modifier6) {
+            return sets.get(bit(modifier0) | bit(modifier1) | bit(modifier2) | bit(modifier3) | bit(modifier4) | bit(modifier5) | bit(modifier6));
+        }
+
+        private static int bit(final Modifier item) {
+            return item == null ? 0 : 1 << item.ordinal();
+        }
+
+        private static Modifiers<Modifier> forBits(int bits) {
+            return sets.get(bits);
+        }
     }
 
     /**
      * The standard {@code java.base} dependency, for convenience.
      */
-    public static final Dependency JAVA_BASE = new Dependency("java.base", Modifiers.of(Modifier.SYNTHETIC, Modifier.MANDATED), Optional.empty(), Map.of());
+    public static final Dependency JAVA_BASE = new Dependency("java.base", Modifier.set(Modifier.SYNTHETIC, Modifier.MANDATED), Optional.empty(), Map.of());
 }

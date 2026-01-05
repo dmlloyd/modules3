@@ -211,7 +211,6 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     public final Resource getExportedResource(final String name) {
-        // todo: filter to exportable resources
         try {
             return getExportedResource(name, stackWalker.walk(callerFinder));
         } catch (IOException e) {
@@ -246,7 +245,7 @@ public class ModuleClassLoader extends ClassLoader {
 
     @Override
     public final Enumeration<URL> getResources(final String name) throws IOException {
-        // todo: filter to exportable resources
+        // todo: filter to exportable resources?
         List<Resource> resources = loadResourcesDirect(name);
         Iterator<Resource> iterator = resources.iterator();
         return new Enumeration<URL>() {
@@ -262,7 +261,7 @@ public class ModuleClassLoader extends ClassLoader {
 
     @Override
     public final Stream<URL> resources(final String name) {
-        // todo: filter to exportable resources
+        // todo: filter to exportable resources?
         try {
             return loadResourcesDirect(name).stream().map(Resource::url);
         } catch (IOException e) {
@@ -486,7 +485,6 @@ public class ModuleClassLoader extends ClassLoader {
                 break;
             }
         }
-        // todo: change this to use the manifest of the JAR which contains the package
         String specTitle;
         String specVersion;
         String specVendor;
@@ -1084,7 +1082,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (cl instanceof ModuleClassLoader mcl) {
             return mcl.loadPackageDirect(pkg);
         } else {
-            // best effort; todo: this could possibly be improved somewhat
+            // best effort
             return cl == null ? null : cl.getDefinedPackage(pkg);
         }
     }

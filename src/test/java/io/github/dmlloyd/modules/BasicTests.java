@@ -12,7 +12,6 @@ import java.util.Set;
 import java.util.random.RandomGenerator;
 
 import io.github.dmlloyd.modules.desc.Dependency;
-import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageInfo;
 import io.smallrye.common.resource.MemoryResource;
@@ -27,7 +26,7 @@ public final class BasicTests {
                 return name.equals("hello") ? new FoundModule(List.of(), (moduleName, loaders) -> new ModuleDescriptor(
                     "hello",
                     Optional.of("1.2.3"),
-                    Modifiers.of(),
+                    ModuleDescriptor.Modifier.set(),
                     Optional.of("test.foobar.Main"),
                     Optional.empty(),
                     List.of(Dependency.JAVA_BASE),
