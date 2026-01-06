@@ -181,7 +181,7 @@ public record Dependency(
 
         public static final List<Modifier> values = List.of(values());
 
-        private static final List<Modifiers<Modifier>> sets = List.copyOf(IntStream.range(0, 16)
+        private static final List<Modifiers<Modifier>> sets = List.copyOf(IntStream.range(0, 128)
             .mapToObj(bits -> new Modifiers<Modifier>(values, Modifier::forBits, bits))
             .toList()
         );
