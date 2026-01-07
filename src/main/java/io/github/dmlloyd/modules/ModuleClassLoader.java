@@ -62,7 +62,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private static final Map<String, Module> bootModuleIndex = ModuleLayer.boot().modules().stream()
-        .flatMap(m -> m.getPackages().stream().filter(p -> m.isExported(p, Util.myModule)).map(p -> Map.entry(p, m)))
+        .flatMap(m -> m.getPackages().stream().map(p -> Map.entry(p, m)))
         .collect(Util.toMap());
 
     private final String moduleName;
@@ -176,12 +176,15 @@ public class ModuleClassLoader extends ClassLoader {
                 linkUses();
             }
             // -> BootLoader.loadClass(...)
-            Class<?> result = Class.forName(bootModuleIndex.get(packageName), dotName);
+            Module module = bootModuleIndex.get(packageName);
+            if (! module.isExported(packageName, module())) {
+                throw new ClassNotFoundException("Cannot load " + name + ": package " + packageName + " not exported from " + module + " to " + module());
+            }
+            Class<?> result = Class.forName(module, dotName);
             if (result != null) {
                 return result;
-            } else {
-                throw new ClassNotFoundException("Cannot find " + name + " from " + this);
             }
+            throw new ClassNotFoundException("Cannot find " + name + " from " + this);
         }
         LoadedModule lm = linkPackages().modulesByPackage().get(packageName);
         if (lm == null) {
