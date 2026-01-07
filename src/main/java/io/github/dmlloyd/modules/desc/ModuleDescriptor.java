@@ -764,11 +764,17 @@ public record ModuleDescriptor(
                 case XMLStreamConstants.START_ELEMENT -> {
                     checkNamespace(xml);
                     switch (xml.getLocalName()) {
-                        case "access" -> {
+                        case "add-exports" -> {
                             if (packageAccesses.isEmpty()) {
                                 packageAccesses = new HashMap<>();
                             }
-                            parseAccessElement(xml, packageAccesses);
+                            parseAccessElement(xml, packageAccesses, PackageAccess.EXPORTED);
+                        }
+                        case "add-opens" -> {
+                            if (packageAccesses.isEmpty()) {
+                                packageAccesses = new HashMap<>();
+                            }
+                            parseAccessElement(xml, packageAccesses, PackageAccess.OPEN);
                         }
                         default -> throw unknownElement(xml);
                     }
@@ -780,18 +786,12 @@ public record ModuleDescriptor(
         }
     }
 
-    private static void parseAccessElement(final XMLStreamReader xml, final Map<String, PackageAccess> packageAccesses) throws XMLStreamException {
+    private static void parseAccessElement(final XMLStreamReader xml, final Map<String, PackageAccess> packageAccesses, PackageAccess access) throws XMLStreamException {
         String name = null;
-        PackageAccess access = PackageAccess.EXPORTED;
         int cnt = xml.getAttributeCount();
         for (int i = 0; i < cnt; i ++) {
             switch (xml.getAttributeLocalName(i)) {
                 case "name" -> name = xml.getAttributeValue(i);
-                case "level" -> access = switch (xml.getAttributeValue(i)) {
-                    case "export" -> PackageAccess.EXPORTED;
-                    case "open" -> PackageAccess.OPEN;
-                    default -> throw unknownAttributeValue(xml, i);
-                };
                 default -> throw unknownAttribute(xml, i);
             }
         }
