@@ -37,13 +37,11 @@ import io.smallrye.classfile.attribute.ModuleMainClassAttribute;
 import io.smallrye.classfile.attribute.ModuleOpenInfo;
 import io.smallrye.classfile.attribute.ModulePackagesAttribute;
 import io.smallrye.classfile.attribute.RuntimeInvisibleAnnotationsAttribute;
-import io.smallrye.classfile.attribute.RuntimeVisibleAnnotationsAttribute;
 import io.smallrye.classfile.constantpool.ClassEntry;
 import io.smallrye.classfile.constantpool.ModuleEntry;
 import io.smallrye.classfile.constantpool.PackageEntry;
 import io.smallrye.classfile.constantpool.Utf8Entry;
 import io.smallrye.classfile.extras.reflect.AccessFlag;
-import io.github.dmlloyd.modules.NativeAccess;
 import io.github.dmlloyd.modules.impl.TextIter;
 import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.constraint.Assert;
@@ -335,19 +333,11 @@ public record ModuleDescriptor(
         ModuleAttribute ma = classModel.findAttribute(Attributes.module()).orElseThrow(ModuleDescriptor::noModuleAttribute);
         Optional<ModulePackagesAttribute> mpa = classModel.findAttribute(Attributes.modulePackages());
         Optional<ModuleMainClassAttribute> mca = classModel.findAttribute(Attributes.moduleMainClass());
-        Optional<RuntimeVisibleAnnotationsAttribute> rva = classModel.findAttribute(Attributes.runtimeVisibleAnnotations());
         Optional<RuntimeInvisibleAnnotationsAttribute> ria = classModel.findAttribute(Attributes.runtimeInvisibleAnnotations());
         Modifiers<ModuleDescriptor.Modifier> mods = ModuleDescriptor.Modifier.set();
         boolean open = classModel.flags().has(AccessFlag.OPEN);
         if (open) {
             mods = mods.with(Modifier.OPEN);
-        }
-        if (rva.isPresent()) {
-            RuntimeVisibleAnnotationsAttribute a = rva.get();
-            Optional<Annotation> opt = a.annotations().stream().filter(an -> an.className().equalsString(NativeAccess.class.getName())).findAny();
-            if (opt.isPresent()) {
-                mods = mods.with(Modifier.NATIVE_ACCESS);
-            }
         }
         if (ria.isPresent()) {
             RuntimeInvisibleAnnotationsAttribute a = ria.get();

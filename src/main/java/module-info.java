@@ -1,18 +1,17 @@
-import io.github.dmlloyd.modules.NativeAccess;
+import io.smallrye.common.annotation.NativeAccess;
 
 @NativeAccess
 module io.github.dmlloyd.modules {
-    requires org.jboss.logging;
-
-    requires io.smallrye.classfile;
-    requires io.smallrye.common.constraint;
-    requires transitive io.smallrye.common.resource;
     requires transitive java.xml;
     requires java.logging;
 
-    // todo: only do this on packaging
-    requires java.se;
-    requires jdk.unsupported;
+    requires org.jboss.logging;
+
+    requires io.smallrye.classfile;
+
+    requires static io.smallrye.common.annotation;
+    requires io.smallrye.common.constraint;
+    requires transitive io.smallrye.common.resource;
 
     exports io.github.dmlloyd.modules;
     exports io.github.dmlloyd.modules.desc;

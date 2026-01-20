@@ -11,13 +11,17 @@ import java.lang.module.ModuleReference;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.security.AllPermission;
 import java.security.PermissionCollection;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -205,6 +209,8 @@ public final class Util {
             return list2;
         } else if (list2 == null || list2.isEmpty()) {
             return list1;
+        } else if (list1.size() == 1 && list2.size() == 1) {
+            return List.of(list1.get(0), list2.get(0));
         } else {
             return Stream.concat(list1.stream(), list2.stream()).collect(toList());
         }
@@ -234,5 +240,72 @@ public final class Util {
                 )
             );
         }
+    }
+
+    public static <T> List<T> listOf(Iterator<T> iter) {
+        if (iter.hasNext()) {
+            T t0 = iter.next();
+            if (iter.hasNext()) {
+                T t1 = iter.next();
+                if (iter.hasNext()) {
+                    // too many
+                    ArrayList<T> list = new ArrayList<>();
+                    list.add(t0);
+                    list.add(t1);
+                    iter.forEachRemaining(list::add);
+                    return List.copyOf(list);
+                } else {
+                    return List.of(t0, t1);
+                }
+            } else {
+                return List.of(t0);
+            }
+        } else {
+            return List.of();
+        }
+    }
+
+    public static <E, R> Iterator<R> mapped(Iterator<E> orig, Function<E, R> mapper) {
+        return new Iterator<R>() {
+            public boolean hasNext() {
+                return orig.hasNext();
+            }
+
+            public R next() {
+                return mapper.apply(orig.next());
+            }
+        };
+    }
+
+    public static <E> Iterator<E> filtered(Iterator<E> orig, Predicate<E> test) {
+        return new Iterator<E>() {
+            E next;
+
+            public boolean hasNext() {
+                while (next == null) {
+                    if (! orig.hasNext()) {
+                        return false;
+                    }
+                    E next = orig.next();
+                    if (next == null) {
+                        throw new NullPointerException();
+                    }
+                    if (test.test(next)) {
+                        this.next = next;
+                        return true;
+                    }
+                }
+                return true;
+            }
+
+            public E next() {
+                if (! hasNext()) throw new NoSuchElementException();
+                try {
+                    return next;
+                } finally {
+                    next = null;
+                }
+            }
+        };
     }
 }

@@ -48,6 +48,16 @@ public final class Modifiers<M extends Enum<M> & ModifierFlag> {
         return newFlags == flags ? this : setFn.apply(newFlags);
     }
 
+    public Modifiers<M> withAll(M item0, M item1) {
+        int newFlags = flags | bit(item0) | bit(item1);
+        return newFlags == flags ? this : setFn.apply(newFlags);
+    }
+
+    public Modifiers<M> withAll(Modifiers<M> other) {
+        int newFlags = flags | other.flags;
+        return newFlags == flags ? this : setFn.apply(newFlags);
+    }
+
     public Modifiers<M> without(M item) {
         int newFlags = flags & ~bit(item);
         return newFlags == flags ? this : setFn.apply(newFlags);

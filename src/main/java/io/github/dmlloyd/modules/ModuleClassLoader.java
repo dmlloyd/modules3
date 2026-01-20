@@ -61,9 +61,24 @@ public class ModuleClassLoader extends ClassLoader {
         }
     }
 
-    private static final Map<String, Module> bootModuleIndex = ModuleLayer.boot().modules().stream()
-        .flatMap(m -> m.getPackages().stream().map(p -> Map.entry(p, m)))
-        .collect(Util.toMap());
+    private static final Map<String, Module> bootModuleIndex;
+
+    static {
+        HashMap<String, Module> map = new HashMap<>(1000);
+        populateIndex(map, Util.myLayer);
+        bootModuleIndex = Map.copyOf(map);
+    }
+
+    private static void populateIndex(Map<String, Module> map, ModuleLayer layer) {
+        for (Module module : layer.modules()) {
+            for (String pn : module.getPackages()) {
+                map.put(pn, module);
+            }
+        }
+        for (ModuleLayer parent : layer.parents()) {
+            populateIndex(map, parent);
+        }
+    }
 
     private final String moduleName;
     private final String moduleVersion;
@@ -811,7 +826,7 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     /**
-     * Transitively link the dependencies of a dependency.
+     * Link the packages of the dependency, and then recurse to the transitive dependencies of the dependency.
      *
      * @param linkState this module's link state (must not be {@code null})
      * @param read {@code true} to register the dependency as readable, otherwise {@code false}
@@ -823,14 +838,14 @@ public class ModuleClassLoader extends ClassLoader {
     private void linkTransitive(LinkState.Defined linkState, boolean read, boolean linked, LoadedModule loadedModule, Map<String, LoadedModule> modulesByPackage, Set<LoadedModule> visited) {
         if (visited.add(loadedModule)) {
             if (loadedModule.classLoader() instanceof ModuleClassLoader mcl) {
+                if (linked) {
+                    loadedModule.forEachExportedPackage(linkState.module(), pn -> {
+                        modulesByPackage.putIfAbsent(pn, loadedModule);
+                    });
+                }
                 for (LoadedDependency ld : mcl.linkDependencies().loadedDependencies()) {
                     Dependency dependency = ld.dependency();
                     boolean subLinked = linked && dependency.isLinked();
-                    if (subLinked) {
-                        loadedModule.forEachExportedPackage(linkState.module(), pn -> {
-                            modulesByPackage.putIfAbsent(pn, loadedModule);
-                        });
-                    }
                     boolean subRead = read && dependency.isRead();
                     if (subRead) {
                         linkState.addReads(loadedModule.module());
@@ -843,6 +858,11 @@ public class ModuleClassLoader extends ClassLoader {
                 Module module = loadedModule.module();
                 java.lang.module.ModuleDescriptor descriptor = module.getDescriptor();
                 if (descriptor != null) {
+                    if (linked && ! ModuleLayer.boot().modules().contains(module)) {
+                        loadedModule.forEachExportedPackage(linkState.module(), pn -> {
+                            modulesByPackage.putIfAbsent(pn, loadedModule);
+                        });
+                    }
                     for (java.lang.module.ModuleDescriptor.Requires require : descriptor.requires()) {
                         if (require.modifiers().contains(java.lang.module.ModuleDescriptor.Requires.Modifier.TRANSITIVE)) {
                             Optional<Module> optDep = module.getLayer().findModule(require.name());
@@ -855,11 +875,6 @@ public class ModuleClassLoader extends ClassLoader {
                             }
                             Module subModule = optDep.get();
                             LoadedModule subLm = LoadedModule.forModule(subModule);
-                            if (linked && ! ModuleLayer.boot().modules().contains(subModule)) {
-                                subLm.forEachExportedPackage(linkState.module(), pn -> {
-                                    modulesByPackage.putIfAbsent(pn, subLm);
-                                });
-                            }
                             if (read) {
                                 linkState.addReads(loadedModule.module());
                             }

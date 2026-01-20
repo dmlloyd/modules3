@@ -8,18 +8,16 @@ import java.lang.invoke.MethodType;
 import java.lang.module.ModuleDescriptor;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.logging.LogManager;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -51,7 +49,6 @@ public final class Launcher implements Runnable {
         }
         ModuleFinder filesystemModuleFinder = ModuleFinder.fromFileSystem(configuration.modulePath());
         ModuleLoader loader = new DelegatingModuleLoader("init", filesystemModuleFinder, parent);
-        // todo: implied
         String launchName = configuration.launchName();
         Module bootModule;
         String mainClassName;
@@ -165,7 +162,7 @@ public final class Launcher implements Runnable {
                 if (cl instanceof ModuleClassLoader mcl) {
                     System.out.println();
                     List<Dependency> dependencies = mcl.linkDependencies().dependencies();
-                    Iterator<LoadedModule> iter = mapped(filtered(dependencies.iterator(), Dependency::isNonSynthetic), d -> d.moduleLoader().orElse(mcl.moduleLoader()).loadModule(d.moduleName()));
+                    Iterator<LoadedModule> iter = Util.mapped(Util.filtered(dependencies.iterator(), Dependency::isNonSynthetic), d -> d.moduleLoader().orElse(mcl.moduleLoader()).loadModule(d.moduleName()));
                     if (iter.hasNext()) {
                         if (wasVisited) {
                             return;
@@ -202,67 +199,12 @@ public final class Launcher implements Runnable {
         }
     }
 
-    static <E, R> Iterator<R> mapped(Iterator<E> orig, Function<E, R> mapper) {
-        return new Iterator<R>() {
-            public boolean hasNext() {
-                return orig.hasNext();
-            }
-
-            public R next() {
-                return mapper.apply(orig.next());
-            }
-        };
-    }
-
-    static <E> Iterator<E> filtered(Iterator<E> orig, Predicate<E> test) {
-        return new Iterator<E>() {
-            E next;
-
-            public boolean hasNext() {
-                while (next == null) {
-                    if (! orig.hasNext()) {
-                        return false;
-                    }
-                    E next = orig.next();
-                    if (next == null) {
-                        throw new NullPointerException();
-                    }
-                    if (test.test(next)) {
-                        this.next = next;
-                        return true;
-                    }
-                }
-                return true;
-            }
-
-            public E next() {
-                if (! hasNext()) throw new NoSuchElementException();
-                try {
-                    return next;
-                } finally {
-                    next = null;
-                }
-            }
-        };
-    }
-
-    /**
-     * The runnable main entry point.
-     * This method exits the JVM when the program finishes.
-     *
-     * @param args the command-line arguments (must not be {@code null})
-     */
-    public static void main(String[] args) {
-        System.exit(main(List.of(args)));
-    }
-
     /**
      * The main entry point.
      *
      * @param args the command-line arguments (must not be {@code null})
-     * @return the exit code (0 for success, and any other value for failure)
      */
-    public static int main(List<String> args) {
+    public static void main(List<String> args) {
         // force logging initialization
         ServiceLoader<LogManager> logManagerLoader = ServiceLoader.load(LogManager.class);
         Iterator<LogManager> lmIter = logManagerLoader.iterator();
@@ -273,7 +215,6 @@ public final class Launcher implements Runnable {
         }
         args = List.copyOf(args);
         Iterator<String> iterator = args.iterator();
-        List<String> implied = List.of();
         List<Path> modulePath = List.of(Path.of("."));
         Map<String, Map<String, PackageAccess>> accesses = Map.of();
         Mode mode = Mode.MODULE;
@@ -289,17 +230,16 @@ public final class Launcher implements Runnable {
                             --help                    Display this message
                             -mp,--module-path <paths> Specifies the location of the module root(s)
                                                       as a list of paths separated by `%s` characters
-                            --implied <module-name>   Add implicit module dependency to all modules TODO: TEMPORARY
                             --jar                     Run a modular JAR in the modular environment
                             --info                    Display information about the module instead of running it
                                                 
-                        Additionally, it is recommended to pass --enable-native-access=io.github.dmlloyd.modules on
+                        Additionally, it is recommended to pass --enable-native-access=%s on
                         Java 22 or later to ensure that permitted submodules can also have native access enabled.
                         Granting this capability will transitively grant the capability to any module which is configured
                         for native access.
-                        """, File.pathSeparator);
+                        """, File.pathSeparator, Objects.requireNonNullElse(Util.myModule.getName(), "ALL-UNNAMED"));
                     System.out.flush();
-                    return 0;
+                    System.exit(0);
                 }
                 case "--version" -> {
                     Module myModule = Launcher.class.getModule();
@@ -311,20 +251,13 @@ public final class Launcher implements Runnable {
                     }
                     System.out.printf("Version: %s%n", version);
                     System.out.flush();
-                    return 0;
-                }
-                case "--implied" -> {
-                    System.err.println("WARNING: the --implied option is temporary");
-                    if (implied.isEmpty()) {
-                        implied = new ArrayList<>();
-                    }
-                    implied.add(iterator.next());
+                    System.exit(0);
                 }
                 case "-mp", "--module-path" -> {
                     if (! iterator.hasNext()) {
                         System.err.printf("Option `%s` requires an argument%n", argument);
                         System.err.flush();
-                        return 1;
+                        System.exit(1);
                     }
                     modulePath = Stream.of(iterator.next().split(File.pathSeparator)).map(Path::of).collect(Util.toList());
                 }
@@ -332,7 +265,7 @@ public final class Launcher implements Runnable {
                     if (mode != Mode.MODULE) {
                         System.err.println("Option --jar may only be given once");
                         System.err.flush();
-                        return 1;
+                        System.exit(1);
                     }
                     mode = Mode.JAR;
                 }
@@ -340,9 +273,12 @@ public final class Launcher implements Runnable {
                     if (infoOnly) {
                         System.err.println("Option --info may only be given once");
                         System.err.flush();
-                        return 1;
+                        System.exit(1);
                     }
                     infoOnly = true;
+                }
+                case "--list-boot-modules" -> {
+                    printAllModules(Util.myLayer);
                 }
                 case "--add-exports", "--add-opens" -> {
                     // export to the main module
@@ -350,14 +286,14 @@ public final class Launcher implements Runnable {
                     if (! iterator.hasNext()) {
                         System.err.printf("Option `%s` requires an argument%n", argument);
                         System.err.flush();
-                        return 1;
+                        System.exit(1);
                     }
                     String str = iterator.next();
                     int idx = str.indexOf('/');
                     if (idx == -1) {
                         System.err.printf("Expected argument in <moduleName>/<packageName> format%n");
                         System.err.flush();
-                        return 1;
+                        System.exit(1);
                     }
                     String moduleName = str.substring(0, idx);
                     String packageName = str.substring(idx + 1);
@@ -365,7 +301,9 @@ public final class Launcher implements Runnable {
                         accesses = new HashMap<>();
                     }
                     switch (argument) {
+                        // use putIfAbsent for exports so it doesn't override opens
                         case "--add-exports" -> accesses.computeIfAbsent(moduleName, Util::newHashMap).putIfAbsent(packageName, PackageAccess.EXPORTED);
+                        // use put for opens so it always overrides exports
                         case "--add-opens" -> accesses.computeIfAbsent(moduleName, Util::newHashMap).put(packageName, PackageAccess.OPEN);
                     }
                 }
@@ -373,40 +311,26 @@ public final class Launcher implements Runnable {
                     if (argument.startsWith("-")) {
                         System.err.printf("Unrecognized option `%s`. Try `--help` for a list of supported options.%n", argument);
                         System.err.flush();
-                        return 1;
+                        System.exit(1);
                     }
-                    Configuration conf = new Configuration(argument, mode, infoOnly, modulePath, listOf(iterator), implied, accesses);
+                    Configuration conf = new Configuration(argument, mode, infoOnly, modulePath, Util.listOf(iterator), accesses);
                     Launcher launcher = new Launcher(conf);
                     launcher.run();
-                    return 0;
+                    return;
                 }
             }
         }
         System.err.println("No module name given");
         System.err.flush();
-        return 1;
+        System.exit(1);
     }
 
-    private static <T> List<T> listOf(Iterator<T> iter) {
-        if (iter.hasNext()) {
-            T t0 = iter.next();
-            if (iter.hasNext()) {
-                T t1 = iter.next();
-                if (iter.hasNext()) {
-                    // too many
-                    ArrayList<T> list = new ArrayList<>();
-                    list.add(t0);
-                    list.add(t1);
-                    iter.forEachRemaining(list::add);
-                    return List.copyOf(list);
-                } else {
-                    return List.of(t0, t1);
-                }
-            } else {
-                return List.of(t0);
-            }
-        } else {
-            return List.of();
+    private static void printAllModules(ModuleLayer layer) {
+        for (Module module : layer.modules()) {
+            System.out.println(module.getName() + " (" + module.getClassLoader() + ")");
+        }
+        for (ModuleLayer parent : layer.parents()) {
+            printAllModules(parent);
         }
     }
 
@@ -415,14 +339,13 @@ public final class Launcher implements Runnable {
         JAR,
     }
 
-    public record Configuration(String launchName, Mode launchMode, boolean infoOnly, List<Path> modulePath, List<String> arguments, List<String> implied,
+    public record Configuration(String launchName, Mode launchMode, boolean infoOnly, List<Path> modulePath, List<String> arguments,
                                 Map<String, Map<String, PackageAccess>> accesses) {
         public Configuration {
             Assert.checkNotNullParam("launchName", launchName);
             Assert.checkNotNullParam("launchMode", launchMode);
             modulePath = List.copyOf(modulePath);
             arguments = List.copyOf(arguments);
-            implied = List.copyOf(implied);
             accesses = accesses.entrySet().stream().collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, e -> Map.copyOf(e.getValue())));
         }
     }
