@@ -199,6 +199,10 @@ public final class Launcher implements Runnable {
         }
     }
 
+    public static void main(String[] args) {
+        main(List.of(args));
+    }
+
     /**
      * The main entry point.
      *
