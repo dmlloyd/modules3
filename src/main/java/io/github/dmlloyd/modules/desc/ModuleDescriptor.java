@@ -788,7 +788,11 @@ public record ModuleDescriptor(
         if (name == null) {
             throw missingAttribute(xml, "name");
         }
-        packageAccesses.put(name, access);
+        if (packageAccesses.containsKey(name)) {
+            packageAccesses.put(name, PackageAccess.max(packageAccesses.get(name), access));
+        } else {
+            packageAccesses.put(name, access);
+        }
         if (xml.nextTag() == XMLStreamConstants.START_ELEMENT) {
             throw unknownElement(xml);
         }

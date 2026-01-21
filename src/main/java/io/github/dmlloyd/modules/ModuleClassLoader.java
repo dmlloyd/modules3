@@ -183,6 +183,8 @@ public class ModuleClassLoader extends ClassLoader {
         String dotName = name.replace('/', '.');
         String packageName = Util.packageName(dotName);
         if (packageName.isEmpty() || linkNew().packages().containsKey(packageName)) {
+            // force full linkage
+            linkPackages();
             return loadClassDirect(name);
         }
         if (bootModuleIndex.containsKey(packageName)) {
@@ -421,7 +423,11 @@ public class ModuleClassLoader extends ClassLoader {
             return loadModuleInfo();
         }
         if (isServiceFileName(name)) {
-            return loadServicesFileDirect(name);
+            if (linkNew().modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
+                return loadServicesFileDirect(name);
+            } else {
+                return null;
+            }
         }
         for (ResourceLoader loader : linkNew().resourceLoaders()) {
             Resource resource = loader.findResource(name);
@@ -444,8 +450,12 @@ public class ModuleClassLoader extends ClassLoader {
             return moduleInfo == null ? List.of() : List.of(moduleInfo);
         }
         if (isServiceFileName(name)) {
-            Resource resource = loadServicesFileDirect(name);
-            return resource == null ? List.of() : List.of(resource);
+            if (linkNew().modifiers().contains(ModuleDescriptor.Modifier.UNNAMED)) {
+                Resource resource = loadServicesFileDirect(name);
+                return resource == null ? List.of() : List.of(resource);
+            } else {
+                return List.of();
+            }
         }
         try {
             return linkNew().resourceLoaders().stream().map(l -> {
@@ -760,31 +770,16 @@ public class ModuleClassLoader extends ClassLoader {
             linkTransitive(linkState, dependency.isRead(), linked, lm, modulesByPackage, visited);
             // link up special package accesses of dependency (only for immediate dependencies)
             Module myModule = module();
-            if (lm.classLoader() instanceof ModuleClassLoader mcl) {
-                for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
-                    switch (entry.getValue()) {
-                        case EXPORTED -> mcl.linkDefined().addExports(entry.getKey(), myModule);
-                        case OPEN -> mcl.linkDefined().addOpens(entry.getKey(), myModule);
-                        case PRIVATE -> {
-                            continue;
-                        }
-                    }
-                    if (linked) {
-                        modulesByPackage.putIfAbsent(entry.getKey(), lm);
+            for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
+                switch (entry.getValue()) {
+                    case EXPORTED -> Util.addExports(depModule, entry.getKey(), myModule);
+                    case OPEN -> Util.addOpens(depModule, entry.getKey(), myModule);
+                    case PRIVATE -> {
+                        continue;
                     }
                 }
-            } else {
-                for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
-                    switch (entry.getValue()) {
-                        case EXPORTED -> Util.addExports(depModule, entry.getKey(), myModule);
-                        case OPEN -> Util.addOpens(depModule, entry.getKey(), myModule);
-                        case PRIVATE -> {
-                            continue;
-                        }
-                    }
-                    if (linked) {
-                        modulesByPackage.putIfAbsent(entry.getKey(), lm);
-                    }
+                if (linked) {
+                    modulesByPackage.putIfAbsent(entry.getKey(), lm);
                 }
             }
         }
