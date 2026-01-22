@@ -8,6 +8,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReference;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.security.AllPermission;
 import java.security.PermissionCollection;
@@ -56,8 +57,10 @@ public final class Util {
 
     // ↓↓↓↓↓↓↓ private ↓↓↓↓↓↓↓
 
+    private static final MethodHandles.Lookup lookup = MethodHandles.lookup();
     private static final MethodHandle enableNativeAccess;
     private static final MethodHandle moduleLayerBindToLoader;
+    private static final MethodHandle newLookup;
 
     static {
         // initialize permission collections
@@ -72,8 +75,12 @@ public final class Util {
         // initialize method handles
         try {
             Modules.addOpens(Object.class.getModule(), "java.lang", myModule);
-            MethodHandles.Lookup lookup = privateLookupIn(Module.class, lookup());
+            MethodHandles.Lookup lookup = privateLookupIn(Module.class, Util.lookup);
             moduleLayerBindToLoader = lookup.findVirtual(ModuleLayer.class, "bindToLoader", MethodType.methodType(void.class, ClassLoader.class)).asType(MethodType.methodType(void.class, ModuleLayer.class, ModuleClassLoader.class));
+            Modules.addOpens(Object.class.getModule(), "java.lang.invoke", myModule);
+            Constructor<MethodHandles.Lookup> dc = MethodHandles.Lookup.class.getDeclaredConstructor(Class.class, Class.class, int.class);
+            dc.setAccessible(true);
+            newLookup = lookup.unreflectConstructor(dc);
         } catch (NoSuchMethodException e) {
             throw toError(e);
         } catch (IllegalAccessException | IllegalAccessError e) {
@@ -93,12 +100,14 @@ public final class Util {
         try {
             if (Runtime.version().feature() >= 22) {
                 //java.lang.Module.implAddEnableNativeAccess
-                h = privateLookupIn(Module.class, lookup()).findVirtual(Module.class, "implAddEnableNativeAccess", methodType).asType(toMethodType);
+                h = privateLookupIn(Module.class, lookup).findVirtual(Module.class, "implAddEnableNativeAccess", methodType).asType(toMethodType);
             }
         } catch (NoSuchMethodException | IllegalAccessException ignored) {
         }
         enableNativeAccess = h;
     }
+
+    // ↓↓↓↓↓↓↓ public ↓↓↓↓↓↓↓
 
     public static String packageName(String binaryName) {
         int idx = binaryName.lastIndexOf('.');
@@ -139,6 +148,17 @@ public final class Util {
     public static void bindLayerToLoader(ModuleLayer layer, ModuleClassLoader loader) {
         try {
             moduleLayerBindToLoader.invokeExact(layer, loader);
+        } catch (RuntimeException | Error e) {
+            throw e;
+        } catch (Throwable e) {
+            throw new UndeclaredThrowableException(e);
+        }
+    }
+
+    public static MethodHandles.Lookup originalLookup(Class<?> clazz) {
+        assert clazz.getClassLoader() instanceof ModuleClassLoader;
+        try {
+            return (MethodHandles.Lookup) newLookup.invokeExact(clazz, (Class<?>) null, lookup.lookupModes());
         } catch (RuntimeException | Error e) {
             throw e;
         } catch (Throwable e) {
