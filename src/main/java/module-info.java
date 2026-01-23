@@ -11,6 +11,8 @@ module io.github.dmlloyd.modules {
 
     requires static io.smallrye.common.annotation;
     requires io.smallrye.common.constraint;
+    requires io.smallrye.common.cpu;
+    requires io.smallrye.common.os;
     requires transitive io.smallrye.common.resource;
 
     exports io.github.dmlloyd.modules;

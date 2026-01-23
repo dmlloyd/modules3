@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -18,6 +19,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -32,6 +34,12 @@ import java.util.jar.Manifest;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.github.dmlloyd.modules.desc.Dependency;
+import io.github.dmlloyd.modules.desc.Modifiers;
+import io.github.dmlloyd.modules.desc.ModuleDescriptor;
+import io.github.dmlloyd.modules.desc.PackageAccess;
+import io.github.dmlloyd.modules.desc.PackageInfo;
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.classfile.ClassFile;
 import io.smallrye.classfile.attribute.ModuleAttribute;
 import io.smallrye.classfile.attribute.ModulePackagesAttribute;
@@ -39,13 +47,10 @@ import io.smallrye.classfile.extras.constant.ConstantUtils;
 import io.smallrye.classfile.extras.constant.ModuleDesc;
 import io.smallrye.classfile.extras.constant.PackageDesc;
 import io.smallrye.classfile.extras.reflect.AccessFlag;
-import io.github.dmlloyd.modules.desc.Dependency;
-import io.github.dmlloyd.modules.desc.Modifiers;
-import io.github.dmlloyd.modules.desc.ModuleDescriptor;
-import io.github.dmlloyd.modules.desc.PackageAccess;
-import io.github.dmlloyd.modules.desc.PackageInfo;
-import io.github.dmlloyd.modules.impl.Util;
+import io.smallrye.common.cpu.CPU;
+import io.smallrye.common.os.OS;
 import io.smallrye.common.resource.MemoryResource;
+import io.smallrye.common.resource.PathResource;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
 import io.smallrye.common.resource.ResourceUtils;
@@ -168,6 +173,26 @@ public class ModuleClassLoader extends ClassLoader {
             return Optional.empty();
         }
         return Optional.of(mainClass);
+    }
+
+    private static final String archName = OS.current().name().toLowerCase(Locale.ROOT) + "-" + CPU.host().name();
+
+    protected String findLibrary(String libName) {
+        for (ResourceLoader loader : linkDefined().resourceLoaders()) {
+            Resource resource;
+            try {
+                resource = loader.findResource(archName + "/" + libName);
+            } catch (IOException e) {
+                // not found
+                continue;
+            }
+            // todo: replace with pr.hasFile()
+            if (resource instanceof PathResource pr && pr.path().getFileSystem() == FileSystems.getDefault()) {
+                // todo: replace with pr.file()
+                return pr.path().toFile().getAbsolutePath();
+            }
+        }
+        return null;
     }
 
     @Override
@@ -471,7 +496,6 @@ public class ModuleClassLoader extends ClassLoader {
     }
 
     private Resource loadServicesFileDirect(final String name) {
-        // TODO: do not auto-generate service files? (think about logmanager)
         List<String> services = linkDependencies().provides().getOrDefault(name.substring(18), List.of());
         if (services.isEmpty()) {
             return null;
