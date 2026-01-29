@@ -1,10 +1,8 @@
 package io.github.dmlloyd.modules.impl;
 
-import static java.lang.invoke.MethodHandles.lookup;
-import static java.lang.invoke.MethodHandles.privateLookupIn;
+import static java.lang.invoke.MethodHandles.*;
 
 import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReference;
@@ -18,6 +16,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BinaryOperator;
@@ -28,7 +27,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import io.github.dmlloyd.modules.ModuleClassLoader;
-import jdk.internal.module.Modules;
 
 /**
  * General utilities for the implementation.
@@ -39,7 +37,7 @@ public final class Util {
     public static final PermissionCollection emptyPermissions;
     public static final PermissionCollection allPermissions;
     public static final Module myModule = Util.class.getModule();
-    public static final ModuleLayer myLayer = myModule.getLayer();
+    public static final ModuleLayer myLayer = Objects.requireNonNullElse(myModule.getLayer(), ModuleLayer.boot());
     public static final Map<String, Module> myLayerModules = myLayer.modules().stream()
         .collect(Collectors.toUnmodifiableMap(
             Module::getName,
@@ -57,7 +55,11 @@ public final class Util {
 
     // ↓↓↓↓↓↓↓ private ↓↓↓↓↓↓↓
 
-    private static final MethodHandles.Lookup lookup = MethodHandles.lookup();
+    private static final Lookup lookup = lookup();
+    private static final MethodHandle addOpens;
+    private static final MethodHandle addExports;
+    private static final MethodHandle addUses;
+    private static final MethodHandle addProvides;
     private static final MethodHandle enableNativeAccess;
     private static final MethodHandle moduleLayerBindToLoader;
     private static final MethodHandle newLookup;
@@ -74,14 +76,21 @@ public final class Util {
         allPermissions = apc;
         // initialize method handles
         try {
-            Modules.addOpens(Object.class.getModule(), "java.lang", myModule);
-            MethodHandles.Lookup lookup = privateLookupIn(Module.class, Util.lookup);
+            Class<?> modules = Class.forName("jdk.internal.module.Modules", true, null);
+            addOpens = lookup.findStatic(modules, "addOpens", MethodType.methodType(void.class, Module.class, String.class, Module.class));
+            addExports = lookup.findStatic(modules, "addExports", MethodType.methodType(void.class, Module.class, String.class, Module.class));
+            addUses = lookup.findStatic(modules, "addUses", MethodType.methodType(void.class, Module.class, Class.class));
+            addProvides = lookup.findStatic(modules, "addProvides", MethodType.methodType(void.class, Module.class, Class.class, Class.class));
+            addOpens(Object.class.getModule(), "java.lang", myModule);
+            Lookup lookup = privateLookupIn(Module.class, Util.lookup);
             moduleLayerBindToLoader = lookup.findVirtual(ModuleLayer.class, "bindToLoader", MethodType.methodType(void.class, ClassLoader.class)).asType(MethodType.methodType(void.class, ModuleLayer.class, ModuleClassLoader.class));
-            Modules.addOpens(Object.class.getModule(), "java.lang.invoke", myModule);
-            Constructor<MethodHandles.Lookup> dc = MethodHandles.Lookup.class.getDeclaredConstructor(Class.class, Class.class, int.class);
+            addOpens(Object.class.getModule(), "java.lang.invoke", myModule);
+            Constructor<Lookup> dc = Lookup.class.getDeclaredConstructor(Class.class, Class.class, int.class);
             dc.setAccessible(true);
             newLookup = lookup.unreflectConstructor(dc);
         } catch (NoSuchMethodException e) {
+            throw toError(e);
+        } catch (ClassNotFoundException e) {
             throw toError(e);
         } catch (IllegalAccessException | IllegalAccessError e) {
             IllegalAccessError error = new IllegalAccessError(e.getMessage() + " -- use: --add-exports java.base/jdk.internal.module=" + myModule.getName());
@@ -96,7 +105,7 @@ public final class Util {
             Module.class
         );
         // this one is flexible: it's only since Java 22 (otherwise, ignore)
-        MethodHandle h = MethodHandles.empty(toMethodType);
+        MethodHandle h = empty(toMethodType);
         try {
             if (Runtime.version().feature() >= 22) {
                 //java.lang.Module.implAddEnableNativeAccess
@@ -107,7 +116,7 @@ public final class Util {
         enableNativeAccess = h;
     }
 
-    // ↓↓↓↓↓↓↓ public ↓↓↓↓↓↓↓
+    // ↓↓↓↓↓↓↓ module-public ↓↓↓↓↓↓↓
 
     public static String packageName(String binaryName) {
         int idx = binaryName.lastIndexOf('.');
@@ -120,50 +129,65 @@ public final class Util {
     }
 
     public static void addUses(Module module, Class<?> type) {
-        Modules.addUses(module, type);
+        try {
+            addUses.invokeExact(module, type);
+        } catch (Throwable e) {
+            throw sneaky(e);
+        }
     }
 
     public static void addProvides(Module m, Class<?> service, Class<?> impl) {
-        Modules.addProvides(m, service, impl);
+        try {
+            addProvides.invokeExact(m, service, impl);
+        } catch (Throwable e) {
+            throw sneaky(e);
+        }
     }
 
     public static void addExports(Module fromModule, String packageName, Module toModule) {
-        Modules.addExports(fromModule, packageName, toModule);
+        try {
+            addExports.invokeExact(fromModule, packageName, toModule);
+        } catch (Throwable e) {
+            throw sneaky(e);
+        }
     }
 
     public static void addOpens(Module fromModule, String packageName, Module toModule) {
-        Modules.addOpens(fromModule, packageName, toModule);
+        try {
+            addOpens.invokeExact(fromModule, packageName, toModule);
+        } catch (Throwable e) {
+            throw sneaky(e);
+        }
     }
 
     public static void enableNativeAccess(final Module module) {
         try {
             enableNativeAccess.invokeExact(module);
-        } catch (RuntimeException | Error e) {
-            throw e;
-        } catch (Throwable t) {
-            throw new UndeclaredThrowableException(t);
+        } catch (Throwable e) {
+            throw sneaky(e);
         }
     }
 
     public static void bindLayerToLoader(ModuleLayer layer, ModuleClassLoader loader) {
         try {
             moduleLayerBindToLoader.invokeExact(layer, loader);
-        } catch (RuntimeException | Error e) {
-            throw e;
         } catch (Throwable e) {
-            throw new UndeclaredThrowableException(e);
+            throw sneaky(e);
         }
     }
 
-    public static MethodHandles.Lookup originalLookup(Class<?> clazz) {
+    public static Lookup originalLookup(Class<?> clazz) {
         assert clazz.getClassLoader() instanceof ModuleClassLoader;
         try {
-            return (MethodHandles.Lookup) newLookup.invokeExact(clazz, (Class<?>) null, lookup.lookupModes());
-        } catch (RuntimeException | Error e) {
-            throw e;
+            return (Lookup) newLookup.invokeExact(clazz, (Class<?>) null, lookup.lookupModes());
         } catch (Throwable e) {
-            throw new UndeclaredThrowableException(e);
+            throw sneaky(e);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <E extends Throwable> RuntimeException sneaky(Throwable t) throws E {
+        throw (E) t;
     }
 
     public static String autoModuleName(TextIter iter) {
@@ -198,6 +222,12 @@ public final class Util {
 
     public static NoSuchMethodError toError(NoSuchMethodException e) {
         var error = new NoSuchMethodError(e.getMessage());
+        error.setStackTrace(e.getStackTrace());
+        return error;
+    }
+
+    public static NoClassDefFoundError toError(ClassNotFoundException e) {
+        var error = new NoClassDefFoundError(e.getMessage());
         error.setStackTrace(e.getStackTrace());
         return error;
     }

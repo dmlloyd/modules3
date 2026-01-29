@@ -1,4 +1,4 @@
-package io.github.dmlloyd.modules;
+package io.github.dmlloyd.modules.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -11,6 +11,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.random.RandomGenerator;
 
+import io.github.dmlloyd.modules.DelegatingModuleLoader;
+import io.github.dmlloyd.modules.FoundModule;
+import io.github.dmlloyd.modules.LoadedModule;
+import io.github.dmlloyd.modules.ModuleFinder;
+import io.github.dmlloyd.modules.ModuleLoader;
 import io.github.dmlloyd.modules.desc.Dependency;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageInfo;

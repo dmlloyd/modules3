@@ -359,25 +359,7 @@ public class ModuleClassLoader extends ClassLoader {
         if (resource == null) {
             return null;
         }
-        String pathName = resource.pathName();
-        if (pathName.endsWith(".class")) {
-            return resource;
-        }
-        if (caller == null || caller.getModule().getClassLoader() == this) {
-            return resource;
-        }
-        String pkgName = Util.resourcePackageName(pathName);
-        if (pkgName.isEmpty() || ! linkDefined().packages().containsKey(pkgName)) {
-            return resource;
-        }
-        if (linkDefined().packages().getOrDefault(pkgName, PackageInfo.PRIVATE).packageAccess().isAtLeast(PackageAccess.EXPORTED)) {
-            return resource;
-        }
-        if (module().isOpen(pkgName, caller.getModule())) {
-            return resource;
-        }
-        // no access
-        return null;
+        return getExportedResource0(caller, resource.pathName(), resource, null);
     }
 
     private List<Resource> getExportedResources(final String name, final Class<?> caller) throws IOException {
@@ -385,25 +367,28 @@ public class ModuleClassLoader extends ClassLoader {
         if (resources.isEmpty()) {
             return List.of();
         }
-        String pathName = resources.get(0).pathName();
+        return getExportedResource0(caller, resources.get(0).pathName(), resources, List.of());
+    }
+
+    private <R> R getExportedResource0(Class<?> caller, String pathName, R resource, R defaultVal) {
         if (pathName.endsWith(".class")) {
-            return resources;
+            return resource;
         }
         if (caller == null || caller.getModule().getClassLoader() == this) {
-            return resources;
+            return resource;
         }
         String pkgName = Util.resourcePackageName(pathName);
         if (pkgName.isEmpty() || ! linkDefined().packages().containsKey(pkgName)) {
-            return resources;
+            return resource;
         }
         if (linkDefined().packages().getOrDefault(pkgName, PackageInfo.PRIVATE).packageAccess().isAtLeast(PackageAccess.EXPORTED)) {
-            return resources;
+            return resource;
         }
         if (module().isOpen(pkgName, caller.getModule())) {
-            return resources;
+            return resource;
         }
         // no access
-        return null;
+        return defaultVal;
     }
 
     // direct loaders
