@@ -68,6 +68,10 @@ public record PackageInfo(
         );
     }
 
+    public static PackageInfo merge(PackageInfo a, PackageInfo b) {
+        return a == null ? b == null ? PRIVATE : b : b == null ? a : a.mergedWith(b);
+    }
+
     public PackageInfo withAccessAtLeast(PackageAccess newAccess) {
         return of(
             PackageAccess.max(packageAccess(), newAccess),

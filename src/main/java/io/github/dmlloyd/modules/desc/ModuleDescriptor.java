@@ -25,6 +25,7 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.classfile.Annotation;
 import io.smallrye.classfile.AnnotationElement;
 import io.smallrye.classfile.AnnotationValue;
@@ -43,7 +44,6 @@ import io.smallrye.classfile.constantpool.PackageEntry;
 import io.smallrye.classfile.constantpool.Utf8Entry;
 import io.smallrye.classfile.extras.reflect.AccessFlag;
 import io.github.dmlloyd.modules.impl.TextIter;
-import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.constraint.Assert;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;

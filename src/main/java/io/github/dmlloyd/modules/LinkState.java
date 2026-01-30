@@ -1,6 +1,6 @@
 package io.github.dmlloyd.modules;
 
-import static io.github.dmlloyd.modules.impl.Util.*;
+import static io.github.dmlloyd.modules.impl.Access.*;
 
 import java.net.URI;
 import java.security.CodeSigner;
@@ -15,6 +15,7 @@ import io.github.dmlloyd.modules.desc.Dependency;
 import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageInfo;
+import io.github.dmlloyd.modules.impl.Access;
 import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -130,7 +131,7 @@ abstract class LinkState {
             final ModuleLayer.Controller layerController
         ) {
             this(other, module, layerController, new ConcurrentHashMap<>());
-            myModule.addReads(module);
+            Util.myModule.addReads(module);
         }
 
         Defined(final Defined other) {
@@ -173,7 +174,7 @@ abstract class LinkState {
 
         void addUses(final Class<?> service) {
             if (layerController != null) {
-                Util.addUses(module, service);
+                Access.addUses(module, service);
             }
         }
 
@@ -187,7 +188,7 @@ abstract class LinkState {
             List<CodeSigner> codeSigners = List.copyOf(resource.codeSigners());
             ProtectionDomain pd = pdCache.get(codeSigners);
             if (pd == null) {
-                pd = new ProtectionDomain(new CodeSource(resource.url(), codeSigners.toArray(CodeSigner[]::new)), allPermissions);
+                pd = new ProtectionDomain(new CodeSource(resource.url(), codeSigners.toArray(CodeSigner[]::new)), Util.allPermissions);
                 ProtectionDomain appearing = pdCache.putIfAbsent(codeSigners, pd);
                 if (appearing != null) {
                     pd = appearing;

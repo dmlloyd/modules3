@@ -39,6 +39,7 @@ import io.github.dmlloyd.modules.desc.Modifiers;
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.github.dmlloyd.modules.desc.PackageAccess;
 import io.github.dmlloyd.modules.desc.PackageInfo;
+import io.github.dmlloyd.modules.impl.Access;
 import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.classfile.ClassFile;
 import io.smallrye.classfile.attribute.ModuleAttribute;
@@ -732,7 +733,7 @@ public class ModuleClassLoader extends ClassLoader {
             ModuleLayer moduleLayer = ctl.layer();
             Module module = moduleLayer.findModule(moduleName).orElseThrow(IllegalStateException::new);
             if (linkState.modifiers().contains(ModuleDescriptor.Modifier.NATIVE_ACCESS)) {
-                Util.enableNativeAccess(module);
+                Access.enableNativeAccess(module);
             }
             defined = new LinkState.Defined(
                 linkState,
@@ -781,8 +782,8 @@ public class ModuleClassLoader extends ClassLoader {
             Module myModule = module();
             for (Map.Entry<String, PackageAccess> entry : dependency.packageAccesses().entrySet()) {
                 switch (entry.getValue()) {
-                    case EXPORTED -> Util.addExports(depModule, entry.getKey(), myModule);
-                    case OPEN -> Util.addOpens(depModule, entry.getKey(), myModule);
+                    case EXPORTED -> Access.addExports(depModule, entry.getKey(), myModule);
+                    case OPEN -> Access.addOpens(depModule, entry.getKey(), myModule);
                     case PRIVATE -> {
                         continue;
                     }
@@ -975,7 +976,7 @@ public class ModuleClassLoader extends ClassLoader {
 
     private void registerLayer(ModuleLayer layer) {
         if (registeredLayers.add(layer)) {
-            Util.bindLayerToLoader(layer, this);
+            Access.bindLayerToLoader(layer, this);
         }
     }
 
