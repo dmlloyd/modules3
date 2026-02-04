@@ -1,6 +1,7 @@
 package io.github.dmlloyd.modules;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.jar.Manifest;
@@ -48,6 +49,12 @@ public interface ModuleDescriptorLoader {
             Resource resource = loader.findResource("module-info.class");
             if (resource != null) {
                 return ModuleDescriptor.fromModuleInfo(resource, loaders, extraAccesses);
+            }
+            resource = loader.findResource("module.xml");
+            if (resource != null) {
+                try (InputStream is = resource.openStream()) {
+                    return ModuleDescriptor.fromXml(is);
+                }
             }
         }
         // automatic module

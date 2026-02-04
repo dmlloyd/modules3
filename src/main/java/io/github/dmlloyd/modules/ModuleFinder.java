@@ -13,9 +13,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamReader;
 
 import io.github.dmlloyd.modules.desc.ModuleDescriptor;
 import io.smallrye.common.resource.Resource;
@@ -95,11 +93,8 @@ public interface ModuleFinder extends Closeable {
                             // now, find the module descriptor
                             if (finalModuleXml != null) {
                                 try (BufferedReader br = Files.newBufferedReader(finalModuleXml, StandardCharsets.UTF_8)) {
-                                    XMLStreamReader xml = XMLInputFactory.newDefaultFactory().createXMLStreamReader(br);
-                                    try (XMLCloser ignored = xml::close) {
-                                        return ModuleDescriptor.fromXml(xml);
-                                    }
-                                } catch (XMLStreamException | IOException e) {
+                                    return ModuleDescriptor.fromXml(br);
+                                } catch (IOException e) {
                                     throw new ModuleLoadException("Failed to read " + finalModuleXml, e);
                                 }
                             }
@@ -109,6 +104,10 @@ public interface ModuleFinder extends Closeable {
                                     resource = resourceLoader.findResource("module-info.class");
                                     if (resource != null) {
                                         return ModuleDescriptor.fromModuleInfo(resource, loaders);
+                                    }
+                                    resource = resourceLoader.findResource("module.xml");
+                                    if (resource != null) {
+                                        return ModuleDescriptor.fromXml(resource);
                                     }
                                 } catch (NoSuchFileException | FileNotFoundException ignored) {
                                     // just try the next one

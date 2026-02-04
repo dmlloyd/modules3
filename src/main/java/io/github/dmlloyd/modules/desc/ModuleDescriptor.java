@@ -1,9 +1,13 @@
 package io.github.dmlloyd.modules.desc;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.lang.module.FindException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,10 +25,12 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import io.github.dmlloyd.modules.impl.TextIter;
 import io.github.dmlloyd.modules.impl.Util;
 import io.smallrye.classfile.Annotation;
 import io.smallrye.classfile.AnnotationElement;
@@ -43,7 +49,6 @@ import io.smallrye.classfile.constantpool.ModuleEntry;
 import io.smallrye.classfile.constantpool.PackageEntry;
 import io.smallrye.classfile.constantpool.Utf8Entry;
 import io.smallrye.classfile.extras.reflect.AccessFlag;
-import io.github.dmlloyd.modules.impl.TextIter;
 import io.smallrye.common.constraint.Assert;
 import io.smallrye.common.resource.Resource;
 import io.smallrye.common.resource.ResourceLoader;
@@ -558,6 +563,43 @@ public record ModuleDescriptor(
             Map.of(),
             Map.of()
         ).withDiscoveredPackages(resourceLoaders);
+    }
+
+    interface XMLCloser extends AutoCloseable {
+        void close() throws XMLStreamException;
+    }
+
+    public static ModuleDescriptor fromXml(Resource resource) throws IOException {
+        try (InputStream is = resource.openStream()) {
+            return fromXml(is);
+        }
+    }
+
+    public static ModuleDescriptor fromXml(InputStream is) throws IOException {
+        try (InputStreamReader r = new InputStreamReader(is, StandardCharsets.UTF_8)) {
+            return fromXml(r);
+        }
+    }
+
+    public static ModuleDescriptor fromXml(Reader r) throws IOException {
+        if (r instanceof BufferedReader br) {
+            return fromXml(br);
+        } else {
+            try (BufferedReader br = new BufferedReader(r)) {
+                return fromXml(br);
+            }
+        }
+    }
+    public static ModuleDescriptor fromXml(BufferedReader br) throws IOException {
+        XMLInputFactory xmlInputFactory = XMLInputFactory.newDefaultFactory();
+        try {
+            XMLStreamReader xml = xmlInputFactory.createXMLStreamReader(br);
+            try (XMLCloser ignored = xml::close) {
+                return fromXml(xml);
+            }
+        } catch (XMLStreamException e) {
+            throw new IOException(e);
+        }
     }
 
     public static ModuleDescriptor fromXml(XMLStreamReader xml) throws XMLStreamException {

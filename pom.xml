@@ -34,10 +34,6 @@
     <dependencies>
         <dependency>
             <groupId>io.smallrye.common</groupId>
-            <artifactId>smallrye-common-annotation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.smallrye.common</groupId>
             <artifactId>smallrye-common-cpu</artifactId>
         </dependency>
         <dependency>
