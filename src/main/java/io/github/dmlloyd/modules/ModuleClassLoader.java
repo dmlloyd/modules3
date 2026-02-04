@@ -621,17 +621,21 @@ public class ModuleClassLoader extends ClassLoader {
         ArrayList<LoadedDependency> loadedDependencies = new ArrayList<>(lsDeps.size());
         for (Dependency dep : lsDeps) {
             ModuleLoader ml = dep.moduleLoader().orElse(moduleLoader);
+            LoadedModule lm;
             if (dep.modifiers().contains(Dependency.Modifier.OPTIONAL)) {
-                LoadedModule lm = ml.loadModule(dep.moduleName());
-                if (lm != null) {
-                    loadedDependencies.add(new LoadedDependency(dep, lm));
-                }
+                lm = ml.loadModule(dep.moduleName());
             } else {
                 try {
-                    loadedDependencies.add(new LoadedDependency(dep, ml.requireModule(dep.moduleName())));
+                    lm = ml.requireModule(dep.moduleName());
                 } catch (ModuleLoadException e) {
                     throw e.withMessage(e.getMessage() + " (required by " + moduleName + ")");
                 }
+            }
+            if (lm != null) {
+                if (lm.classLoader() == this && lm.name().isPresent()) {
+                    throw new ModuleLoadException("Module " + moduleName() + " depends on itself");
+                }
+                loadedDependencies.add(new LoadedDependency(dep, lm));
             }
         }
         return doLocked(ModuleClassLoader::linkDependenciesLocked, loadedDependencies);
