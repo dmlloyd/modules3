@@ -780,6 +780,11 @@ public record ModuleDescriptor(
                         modifiers = modifiers.without(Dependency.Modifier.LINKED);
                     }
                 }
+                case "read" -> {
+                    if (! Boolean.parseBoolean(xml.getAttributeValue(i))) {
+                        modifiers = modifiers.without(Dependency.Modifier.READ);
+                    }
+                }
                 case "services" -> {
                     if (! Boolean.parseBoolean(xml.getAttributeValue(i))) {
                         modifiers = modifiers.without(Dependency.Modifier.SERVICES);
